@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview",
-    "deploy:pages": "npm run build && wrangler pages deploy dist --project-name webadb-autoglm --branch main"
+    "deploy:pages": "npm run build && git push origin main"
   },
   "dependencies": {
     "@yume-chan/adb": "^2.6.0",

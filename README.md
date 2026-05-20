@@ -119,13 +119,13 @@ npm run build
 
 项目已创建在 Cloudflare Pages：
 
-- 最新部署：https://259d8673.webadb-autoglm.pages.dev/
-- 部署方式：Wrangler Direct Upload
+- 最新部署：https://webadb-autoglm.pages.dev/
+- 部署方式：GitHub 绑定自动部署
 
 重新部署：
 
 ```bash
-npm run deploy:pages
+git push origin main
 ```
 
 ## 友链
