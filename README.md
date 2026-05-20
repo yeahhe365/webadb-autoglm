@@ -119,7 +119,6 @@ npm run build
 
 项目已创建在 Cloudflare Pages：
 
-- 访问地址：https://webadb-autoglm.pages.dev/
 - 最新部署：https://259d8673.webadb-autoglm.pages.dev/
 - 部署方式：Wrangler Direct Upload
 
