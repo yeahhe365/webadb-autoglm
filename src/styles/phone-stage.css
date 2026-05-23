@@ -95,11 +95,23 @@
   color: var(--modal-text);
   display: flex;
   gap: 4px;
+  opacity: 0;
   padding: 4px;
+  pointer-events: none;
   position: absolute;
   right: 12px;
   top: 12px;
+  transform: translateY(-4px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
   z-index: 12;
+}
+
+.phone-stage:is(:hover, :focus-within) .phone-zoom-controls {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .phone-stage-fullscreen .phone-zoom-controls {

@@ -157,6 +157,17 @@ describe('PhoneStage', () => {
     expect(controls.closest('.phone-frame')).toBeNull()
   })
 
+  it('reveals screenshot controls only while hovering or focusing the preview area', () => {
+    expect(phoneStageCss).toMatch(/\.phone-zoom-controls\s*\{[\s\S]*opacity:\s*0/)
+    expect(phoneStageCss).toMatch(/\.phone-zoom-controls\s*\{[\s\S]*pointer-events:\s*none/)
+    expect(phoneStageCss).toMatch(
+      /\.phone-stage:is\(:hover,\s*:focus-within\)\s+\.phone-zoom-controls\s*\{[\s\S]*opacity:\s*1/,
+    )
+    expect(phoneStageCss).toMatch(
+      /\.phone-stage:is\(:hover,\s*:focus-within\)\s+\.phone-zoom-controls\s*\{[\s\S]*pointer-events:\s*auto/,
+    )
+  })
+
   it('sizes the normal phone preview to use most of the preview area', () => {
     expect(phoneStageCss).toMatch(/\.phone-stage\s*\{[\s\S]*padding:\s*12px/)
     expect(phoneStageCss).toMatch(/\.phone-frame\s*\{[\s\S]*border:\s*8px solid/)
