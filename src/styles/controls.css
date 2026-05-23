@@ -99,6 +99,15 @@ button.danger {
   color: var(--danger);
 }
 
+.icon-button {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0;
+  width: 34px;
+}
+
 .wide {
   width: 100%;
 }

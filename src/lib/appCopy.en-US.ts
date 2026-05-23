@@ -36,6 +36,9 @@ export const EN_US_COPY = {
   keyboard: 'Keyboard',
   usbDebuggingRequired: 'USB debugging required',
   connect: 'Connect',
+  adbConnectionHelpLabel: 'ADB connection help',
+  adbConnectionHelpText:
+    'If the connection fails, run adb kill-server in your terminal, then reconnect the device.',
   disconnect: 'Disconnect',
   capture: 'Capture',
   installAdbKeyboard: 'Install ADB Keyboard',

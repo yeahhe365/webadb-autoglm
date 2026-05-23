@@ -36,6 +36,8 @@ export const ZH_CN_COPY = {
   keyboard: '键盘',
   usbDebuggingRequired: '需要 USB 调试',
   connect: '连接',
+  adbConnectionHelpLabel: 'ADB 连接帮助',
+  adbConnectionHelpText: '如果连接不上，请在终端输入 adb kill-server，然后重新连接设备。',
   disconnect: '断开',
   capture: '截图',
   installAdbKeyboard: '安装 ADB 键盘',

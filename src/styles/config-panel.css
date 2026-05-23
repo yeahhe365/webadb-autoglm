@@ -33,6 +33,51 @@
   color: var(--text-soft);
 }
 
+.adb-connect-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.adb-help {
+  display: inline-flex;
+  position: relative;
+}
+
+.adb-help-trigger {
+  color: var(--text-secondary);
+}
+
+.adb-help-tooltip {
+  background: var(--phone-shell);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  bottom: calc(100% + 8px);
+  box-shadow: 0 10px 24px var(--shadow-strong);
+  color: var(--on-primary);
+  font-size: 12px;
+  font-weight: 700;
+  inline-size: min(260px, calc(100vw - 36px));
+  line-height: 1.35;
+  opacity: 0;
+  padding: 8px 10px;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease;
+  z-index: 5;
+}
+
+.adb-help:hover .adb-help-tooltip,
+.adb-help:focus-within .adb-help-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .capability-grid {
   display: flex;
   flex-wrap: wrap;
