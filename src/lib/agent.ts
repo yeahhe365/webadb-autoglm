@@ -27,9 +27,11 @@ import type {
 import { OpenAiClientError } from './openAiErrors'
 import { compactScreenshotForMemory, mapActionCoordinates, modelScreenshotView } from './screenshot'
 import { buildAgentPromptContext, compactThreadContext } from './contextBuilder'
+import { truncateRetainedText } from './textRetention'
 import {
   createAgentThread,
   createConversationMessage,
+  rememberThreadInformation,
   recordThreadFinalResponse,
   recordThreadTurnExecution,
   recordThreadUserMessage,
@@ -40,15 +42,19 @@ import {
 } from './agentThread'
 import {
   createDefaultActionToolRegistry,
+  type ActionToolSignature,
   type ActionToolResult,
   type ActionToolRegistry,
 } from './toolRegistry'
+import { isAbortError, throwIfAborted, withAbort } from './abortSignal'
 
 const MAX_AUTO_RECOVERABLE_EXECUTION_FAILURES = 2
+const RUN_RESULT_MODEL_OUTPUT_MAX_LENGTH = 4000
 
 export type AgentTiming = {
   captureMs: number
   currentAppMs: number
+  executionMs?: number
   modelMs: number
   parseMs: number
   totalMs: number
@@ -66,6 +72,7 @@ export type AgentStep = {
   executionAction: AgentAction
   preview: string
   timing: AgentTiming
+  toolName?: string
   executionResult?: string
 }
 
@@ -87,6 +94,9 @@ export type RunAgentStepInput = {
   appCards?: AppCardMap
   customTools?: readonly CustomToolDefinition[]
   secrets?: readonly SecretRecord[]
+  memoryEnabled?: boolean
+  memoryItems?: readonly string[]
+  actionTools?: Record<string, ActionToolSignature>
   index?: number
   onSnapshot?: (snapshot: AgentDeviceSnapshot) => void | Promise<void>
   signal?: AbortSignal
@@ -117,6 +127,9 @@ export type AgentRunnerInput = {
   appCards?: AppCardMap
   customTools?: readonly CustomToolDefinition[]
   secrets?: readonly SecretRecord[]
+  memoryEnabled?: boolean
+  memoryItems?: readonly string[]
+  onMemoryItem?: (information: string) => void
   signal?: AbortSignal
   onSnapshot?: (snapshot: AgentDeviceSnapshot) => void | Promise<void>
   onStep?: (step: AgentStep) => void
@@ -133,6 +146,11 @@ export type CreateAgentRunnerInput = {
 }
 
 export type AgentSession = AgentThread
+
+export type RecordAgentStepOptions = {
+  memoryEnabled?: boolean
+  onMemoryItem?: (information: string) => void
+}
 
 export function createAgentSession(task: string): AgentSession {
   return createAgentThread(task)
@@ -164,6 +182,7 @@ export function recordAgentStep(
   step: AgentStep,
   executionResult?: string,
   success = executionResult === undefined ? undefined : true,
+  options: RecordAgentStepOptions = {},
 ) {
   step.executionResult = executionResult
   session.stepNumber = Math.max(session.stepNumber, step.index)
@@ -174,16 +193,36 @@ export function recordAgentStep(
   })
 
   if (step.turnId && session.turns.some((turn) => turn.id === step.turnId)) {
-    recordThreadTurnExecution(session, step.turnId, {
+    const turn = recordThreadTurnExecution(session, step.turnId, {
       executionResult,
+      toolName: step.toolName,
+      memoryEnabled: options.memoryEnabled,
+      timing: step.timing,
       success,
     })
+    if (options.memoryEnabled && turn.action.action === 'note' && success !== false) {
+      const message = turn.action.message.trim()
+      if (message) {
+        options.onMemoryItem?.(message)
+      }
+    }
     compactThreadContext(session)
     return
   }
 
   session.lastActionPreview = step.preview
   session.lastExecutionResult = executionResult
+  if (
+    options.memoryEnabled &&
+    step.action.action === 'note' &&
+    success !== false &&
+    step.action.message.trim()
+  ) {
+    const retained = rememberThreadInformation(session, step.action.message)
+    if (retained) {
+      options.onMemoryItem?.(retained)
+    }
+  }
   if (step.action.action === 'done') {
     session.finished = true
     session.success = true
@@ -207,17 +246,28 @@ export function recordAgentStep(
   compactThreadContext(session)
 }
 
+export function recordAgentStepExecutionDuration(step: AgentStep, executionMs: number) {
+  const roundedExecutionMs = Math.max(0, Math.round(executionMs))
+  const previousExecutionMs = step.timing.executionMs ?? 0
+
+  step.timing.executionMs = roundedExecutionMs
+  step.timing.totalMs = Math.max(0, step.timing.totalMs - previousExecutionMs + roundedExecutionMs)
+}
+
 export async function recordAgentFinalResponse({
   client,
   modelConfig,
   session,
+  signal,
   task,
 }: {
   client: OpenAiClient
   modelConfig: ModelConfig
   session: AgentSession
+  signal?: AbortSignal
   task: string
 }) {
+  throwIfAborted(signal)
   const fallback = session.progressSummary.trim() || 'Task completed.'
   let finalResponse = fallback
 
@@ -225,21 +275,29 @@ export async function recordAgentFinalResponse({
     try {
       finalResponse =
         (
-          await client.completeFinalResponse({
-            ...modelConfig,
-            task,
-            conversation: session.messages.map((message) => ({ ...message })),
-            history: session.history.map((item) => ({ ...item })),
-            currentApp: session.currentApp,
-            deviceState: session.deviceState,
-            progressSummary: session.progressSummary,
-          })
+          await withAbort(
+            client.completeFinalResponse({
+              ...modelConfig,
+              task,
+              conversation: session.messages.map((message) => ({ ...message })),
+              history: session.history.map((item) => ({ ...item })),
+              currentApp: session.currentApp,
+              deviceState: session.deviceState,
+              progressSummary: session.progressSummary,
+              signal,
+            }),
+            signal,
+          )
         ).trim() || fallback
-    } catch {
+    } catch (caught) {
+      if (isAbortError(caught)) {
+        throw caught
+      }
       finalResponse = fallback
     }
   }
 
+  throwIfAborted(signal)
   const message = recordThreadFinalResponse(session, finalResponse)
   compactThreadContext(session)
   return message.content
@@ -254,35 +312,40 @@ export async function runAgentStep({
   session,
   appCards = createDefaultAppCards(),
   customTools,
+  memoryEnabled = false,
+  memoryItems,
+  actionTools,
   index = 1,
   onSnapshot,
   secrets,
   signal,
   unrestrictedMode,
 }: RunAgentStepInput): Promise<AgentStep> {
-  if (signal?.aborted) {
-    throw new DOMException('Run stopped.', 'AbortError')
-  }
+  throwIfAborted(signal)
   const startedAt = now()
   const captureStartedAt = now()
-  const screenshot = await device.screenshot()
+  const screenshot = await withAbort(device.screenshot(), signal)
   const captureMs = elapsed(captureStartedAt)
   const currentAppStartedAt = now()
-  const deviceState = await getDeviceStateOrUnknown(device)
+  const deviceState = await getDeviceStateOrUnknown(device, signal)
   const currentApp = deviceState.app
   const currentAppMs = elapsed(currentAppStartedAt)
   const modelScreenshot = modelScreenshotView(screenshot)
   const retainedScreenshot = compactScreenshotForMemory(screenshot)
-  await onSnapshot?.({
-    index,
-    screenshot: retainedScreenshot,
-    currentApp,
-    deviceState,
-  })
-  const installedApps = await getInstalledAppsOrEmpty(device)
-  if (signal?.aborted) {
-    throw new DOMException('Run stopped.', 'AbortError')
-  }
+  await withAbort(
+    Promise.resolve(
+      onSnapshot?.({
+        index,
+        screenshot: retainedScreenshot,
+        currentApp,
+        deviceState,
+      }),
+    ),
+    signal,
+  )
+  const installedApps = await getInstalledAppsOrEmpty(device, signal)
+  const screenTree = await getScreenTreeOrUndefined(device, signal)
+  throwIfAborted(signal)
   const modelStartedAt = now()
   if (session) {
     session.stepNumber = Math.max(session.stepNumber, index)
@@ -305,9 +368,13 @@ export async function runAgentStep({
     deviceScreen: screenshot.screen,
     currentApp,
     deviceState,
+    screenTree,
     appCard,
     customTools: promptCustomTools,
     installedApps,
+    memoryEnabled,
+    memoryItems,
+    actionTools,
     secrets: promptSecrets,
   })
   const promptContext = builtContext.text
@@ -321,10 +388,14 @@ export async function runAgentStep({
     deviceScreen: screenshot.screen,
     currentApp,
     deviceState,
+    screenTree,
     history: builtContext.history,
     appCard,
     customTools: promptCustomTools,
     installedApps,
+    memoryEnabled,
+    memoryItems,
+    actionTools,
     secrets: promptSecrets,
     promptContext,
     unrestrictedMode,
@@ -342,11 +413,14 @@ export async function runAgentStep({
     }
 
     const repairStartedAt = now()
-    modelOutput = await client.repairAction({
-      ...completionRequest,
-      invalidOutput: modelOutput,
-      validationError: action.message,
-    })
+    modelOutput = await withAbort(
+      client.repairAction({
+        ...completionRequest,
+        invalidOutput: modelOutput,
+        validationError: action.message,
+      }),
+      signal,
+    )
     modelMs += elapsed(repairStartedAt)
 
     parseStartedAt = now()
@@ -409,24 +483,30 @@ async function completeActionWithEmptyContentRetry(
   request: CompletionRequest,
 ) {
   try {
-    return await client.completeAction(request)
+    return await withAbort(client.completeAction(request), request.signal)
   } catch (caught) {
+    if (isAbortError(caught)) {
+      throw caught
+    }
     if (!isEmptyAssistantContentError(caught) || request.signal?.aborted) {
       throw caught
     }
 
-    return client.completeAction({
-      ...request,
-      conversation: [],
-      history: request.history?.slice(-6),
-      stream: false,
-      promptContext: [
-        request.promptContext,
-        emptyContentRetryInstruction(request.actionProtocol),
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    })
+    return withAbort(
+      client.completeAction({
+        ...request,
+        conversation: [],
+        history: request.history?.slice(-6),
+        stream: false,
+        promptContext: [
+          request.promptContext,
+          emptyContentRetryInstruction(request.actionProtocol),
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      }),
+      request.signal,
+    )
   }
 }
 
@@ -480,6 +560,9 @@ export function createAgentRunner({
             session,
             appCards: input.appCards,
             customTools: input.customTools,
+            memoryEnabled: input.memoryEnabled,
+            memoryItems: input.memoryItems,
+            actionTools: toolRegistry.getSignatures(),
             index,
             onSnapshot: input.onSnapshot,
             secrets: input.secrets,
@@ -495,32 +578,49 @@ export function createAgentRunner({
         if (input.signal?.aborted) {
           return { status: 'stopped', steps }
         }
-        steps.push(step)
         input.onStep?.(step)
+        steps.push(retainStepForRunResult(step))
 
         if (step.action.action === 'done') {
-          recordAgentStep(session, step)
+          recordAgentStep(session, step, undefined, undefined, {
+            memoryEnabled: input.memoryEnabled,
+            onMemoryItem: input.onMemoryItem,
+          })
           if (session.pendingUserMessages.length > 0) {
             continue
           }
-          const finalResponse = await recordAgentFinalResponse({
-            client,
-            modelConfig: input.modelConfig,
-            session,
-            task: input.task,
-          })
-          await input.onFinalResponse?.(finalResponse)
-          return { status: 'done', steps, finalResponse }
+          try {
+            const finalResponse = await recordAgentFinalResponse({
+              client,
+              modelConfig: input.modelConfig,
+              session,
+              signal: input.signal,
+              task: input.task,
+            })
+            await withAbort(Promise.resolve(input.onFinalResponse?.(finalResponse)), input.signal)
+            return { status: 'done', steps, finalResponse }
+          } catch (caught) {
+            if (input.signal?.aborted || isAbortError(caught)) {
+              return { status: 'stopped', steps }
+            }
+            throw caught
+          }
         }
 
         if (step.action.action === 'take_over' && !input.unrestrictedMode) {
-          recordAgentStep(session, step)
+          recordAgentStep(session, step, undefined, undefined, {
+            memoryEnabled: input.memoryEnabled,
+            onMemoryItem: input.onMemoryItem,
+          })
           return { status: 'awaiting_takeover', steps }
         }
 
         const loopSignal = detectLoopGuard(session, step)
         if (loopSignal) {
-          recordAgentStep(session, step, loopSignal)
+          recordAgentStep(session, step, loopSignal, undefined, {
+            memoryEnabled: input.memoryEnabled,
+            onMemoryItem: input.onMemoryItem,
+          })
           return { status: 'loop_guard', steps, reason: loopSignal }
         }
 
@@ -532,24 +632,47 @@ export function createAgentRunner({
           return { status: 'stopped', steps }
         }
 
-        const result = await toolRegistry.execute(step.executionAction, {
-          device,
-          confirmSensitiveAction: input.confirmSensitiveAction,
-          unrestrictedMode: input.unrestrictedMode,
-          safetyContext: {
-            task: input.task,
-            currentApp: step.currentApp,
-            deviceState: step.deviceState,
-            modelOutput: step.modelOutput,
-          },
-          customTools: input.customTools,
-          secrets: input.secrets,
-        })
+        let result: ActionToolResult
+        const executionStartedAt = now()
+        try {
+          result = await toolRegistry.execute(step.executionAction, {
+            device,
+            confirmSensitiveAction: input.confirmSensitiveAction,
+            unrestrictedMode: input.unrestrictedMode,
+            safetyContext: {
+              task: input.task,
+              currentApp: step.currentApp,
+              deviceState: step.deviceState,
+              modelOutput: step.modelOutput,
+            },
+            customTools: input.customTools,
+            secrets: input.secrets,
+            signal: input.signal,
+          })
+        } catch (caught) {
+          if (input.signal?.aborted || isAbortError(caught)) {
+            return { status: 'stopped', steps }
+          }
+          throw caught
+        }
+        step.toolName = result.toolName
+        recordAgentStepExecutionDuration(step, elapsed(executionStartedAt))
         if (input.signal?.aborted) {
           return { status: 'stopped', steps }
         }
-        recordAgentStep(session, step, result.summary, result.success)
-        await input.onExecuted?.(step, result.summary)
+        recordAgentStep(session, step, result.summary, result.success, {
+          memoryEnabled: input.memoryEnabled,
+          onMemoryItem: input.onMemoryItem,
+        })
+        steps[steps.length - 1] = retainStepForRunResult(step)
+        try {
+          await withAbort(Promise.resolve(input.onExecuted?.(step, result.summary)), input.signal)
+        } catch (caught) {
+          if (input.signal?.aborted || isAbortError(caught)) {
+            return { status: 'stopped', steps }
+          }
+          throw caught
+        }
         if (!result.success) {
           if (result.safetyDecision === 'take_over') {
             return { status: 'awaiting_takeover', steps, reason: result.summary }
@@ -576,6 +699,26 @@ function isAutoRecoverableExecutionFailure(result: ActionToolResult) {
   return !result.safetyDecision
 }
 
+function retainStepForRunResult(step: AgentStep): AgentStep {
+  return {
+    ...step,
+    promptContext: undefined,
+    modelOutput: truncateRetainedText(step.modelOutput, RUN_RESULT_MODEL_OUTPUT_MAX_LENGTH),
+    screenshot: stripScreenshotImageData(step.screenshot),
+  }
+}
+
+function stripScreenshotImageData(screenshot: DeviceScreenshot): DeviceScreenshot {
+  return {
+    dataUrl: '',
+    screen: screenshot.screen,
+    ...(screenshot.modelScreen ? { modelScreen: screenshot.modelScreen } : {}),
+    ...(screenshot.modelGridDivisions !== undefined
+      ? { modelGridDivisions: screenshot.modelGridDivisions }
+      : {}),
+  }
+}
+
 function markPendingUserMessagesConsumed(
   session: AgentSession,
   consumedMessages: readonly QueuedUserMessage[],
@@ -587,13 +730,6 @@ function markPendingUserMessagesConsumed(
   const consumedIds = new Set(consumedMessages.map((message) => message.id))
   session.pendingUserMessages = session.pendingUserMessages.filter(
     (message) => !consumedIds.has(message.id),
-  )
-}
-
-function isAbortError(caught: unknown) {
-  return (
-    (caught instanceof DOMException && caught.name === 'AbortError') ||
-    (caught instanceof Error && caught.name === 'AbortError')
   )
 }
 
@@ -661,22 +797,43 @@ function countConsecutive(
   return count
 }
 
-async function getDeviceStateOrUnknown(device: DeviceBackend): Promise<DeviceState> {
+async function getDeviceStateOrUnknown(
+  device: DeviceBackend,
+  signal?: AbortSignal,
+): Promise<DeviceState> {
   try {
-    return await device.getDeviceState()
+    return await withAbort(device.getDeviceState(), signal)
   } catch {
+    throwIfAborted(signal)
     return createUnknownDeviceState()
   }
 }
 
-async function getInstalledAppsOrEmpty(device: DeviceBackend): Promise<InstalledApp[]> {
+async function getInstalledAppsOrEmpty(
+  device: DeviceBackend,
+  signal?: AbortSignal,
+): Promise<InstalledApp[]> {
   if (!device.getInstalledApps) {
     return []
   }
 
   try {
-    return await device.getInstalledApps()
+    return await withAbort(device.getInstalledApps(), signal)
   } catch {
+    throwIfAborted(signal)
     return []
+  }
+}
+
+async function getScreenTreeOrUndefined(device: DeviceBackend, signal?: AbortSignal) {
+  if (!device.getScreenTree) {
+    return undefined
+  }
+
+  try {
+    return await withAbort(device.getScreenTree(), signal)
+  } catch {
+    throwIfAborted(signal)
+    return undefined
   }
 }

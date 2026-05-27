@@ -1,43 +1,48 @@
 :root {
   --sans:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --accent: #2f74b5;
-  --accent-soft: #eef6fb;
-  --accent-soft-border: #cfe2ee;
-  --accent-soft-text: #2d5d7f;
-  --border: #d9e1e5;
-  --border-strong: #cfd9de;
-  --button-bg: #eef2f3;
-  --button-bg-hover: #e4edf1;
+  --accent: #2473b8;
+  --accent-soft: #eef7fd;
+  --accent-soft-border: #bddcf0;
+  --accent-soft-text: #225f91;
+  --border: #dce4e2;
+  --border-strong: #c6d2d0;
+  --button-bg: #edf3f2;
+  --button-bg-hover: #e1ecea;
   --danger: #9b3723;
   --danger-bg: #fff2ed;
   --danger-border: #f2c7ba;
-  --grid-line: rgba(23, 32, 38, 0.05);
+  --field-bg: #fbfcfb;
+  --focus-ring: rgba(36, 115, 184, 0.17);
+  --grid-line: rgba(25, 38, 39, 0.055);
   --modal-text: #eef2f3;
   --overlay: rgba(17, 24, 29, 0.62);
   --on-contrast: #ffffff;
   --on-primary: #ffffff;
-  --page-bg: #f4f7f8;
+  --page-bg: #f5f7f5;
   --panel-bg: #ffffff;
-  --phone-shell: #172026;
-  --phone-screen: #11181d;
-  --primary: #1c7c54;
-  --primary-hover: #166843;
-  --primary-muted: #8bbdaa;
-  --shadow: rgba(28, 44, 55, 0.08);
+  --panel-bg-elevated: #ffffff;
+  --phone-shell: #151b1d;
+  --phone-screen: #0d1213;
+  --primary: #1d7a58;
+  --primary-hover: #166549;
+  --primary-muted: #9abdaa;
+  --primary-soft: #eaf6f0;
+  --shadow: rgba(25, 42, 42, 0.08);
+  --shadow-panel: rgba(25, 42, 42, 0.1);
   --shadow-strong: rgba(0, 0, 0, 0.28);
   --status-bg: #eef2f3;
   --status-ok-bg: #e7f5ef;
   --status-ok-border: #b7decf;
   --status-ok-text: #1d6b4f;
   --status-text: #53636d;
-  --subtle-bg: #f8fafb;
-  --surface-muted: #f2f5f6;
-  --surface-muted-border: #dfe7eb;
-  --text: #172026;
-  --text-muted: #5b6f7c;
-  --text-soft: #6d7c86;
-  --text-secondary: #42515c;
+  --subtle-bg: #f8faf8;
+  --surface-muted: #f0f5f3;
+  --surface-muted-border: #dbe7e4;
+  --text: #17201f;
+  --text-muted: #5c6d69;
+  --text-soft: #6f7f7b;
+  --text-secondary: #40514e;
   --warn: #8b5c10;
   --warn-bg: #fff4dc;
   --warn-border: #f0d49d;
@@ -54,43 +59,48 @@
 
 :root[data-theme='dark'],
 :root[data-system-theme='dark'] {
-  --accent: #75b8f0;
-  --accent-soft: #153249;
-  --accent-soft-border: #254b68;
-  --accent-soft-text: #9fd0fb;
-  --border: #2b3942;
-  --border-strong: #3a4a54;
-  --button-bg: #1d2931;
-  --button-bg-hover: #26353f;
+  --accent: #70b7ef;
+  --accent-soft: #122a37;
+  --accent-soft-border: #244b62;
+  --accent-soft-text: #a5d6ff;
+  --border: #263431;
+  --border-strong: #354744;
+  --button-bg: #1c2725;
+  --button-bg-hover: #25322f;
   --danger: #ffb2a1;
-  --danger-bg: #3a1d17;
+  --danger-bg: #3b1f19;
   --danger-border: #734135;
-  --grid-line: rgba(238, 244, 247, 0.06);
+  --field-bg: #101615;
+  --focus-ring: rgba(112, 183, 239, 0.22);
+  --grid-line: rgba(232, 244, 239, 0.055);
   --modal-text: #eef2f3;
-  --overlay: rgba(3, 8, 11, 0.72);
-  --on-contrast: #0f1418;
+  --overlay: rgba(6, 10, 10, 0.72);
+  --on-contrast: #0f1414;
   --on-primary: #ffffff;
-  --page-bg: #0f1418;
-  --panel-bg: #151d23;
-  --phone-shell: #0c1115;
-  --phone-screen: #0b1014;
-  --primary: #43a978;
-  --primary-hover: #55bd89;
-  --primary-muted: #2e684f;
-  --shadow: rgba(0, 0, 0, 0.22);
+  --page-bg: #0d1110;
+  --panel-bg: #141b19;
+  --panel-bg-elevated: #18211f;
+  --phone-shell: #070b0c;
+  --phone-screen: #060a0b;
+  --primary: #49b683;
+  --primary-hover: #5bc891;
+  --primary-muted: #2f684f;
+  --primary-soft: #173427;
+  --shadow: rgba(0, 0, 0, 0.2);
+  --shadow-panel: rgba(0, 0, 0, 0.32);
   --shadow-strong: rgba(0, 0, 0, 0.5);
-  --status-bg: #1d2931;
+  --status-bg: #1c2725;
   --status-ok-bg: #173428;
   --status-ok-border: #2e6b50;
   --status-ok-text: #8be0b9;
   --status-text: #b2c0c9;
-  --subtle-bg: #11191f;
-  --surface-muted: #1c252c;
-  --surface-muted-border: #2f3d46;
-  --text: #eef4f7;
-  --text-muted: #9fb0bc;
-  --text-soft: #8ea0aa;
-  --text-secondary: #c6d3da;
+  --subtle-bg: #101715;
+  --surface-muted: #1a2421;
+  --surface-muted-border: #2c3d39;
+  --text: #edf5f1;
+  --text-muted: #a5b4af;
+  --text-soft: #93a29d;
+  --text-secondary: #c9d6d1;
   --warn: #ffd48a;
   --warn-bg: #332714;
   --warn-border: #6f5523;
@@ -102,11 +112,20 @@
 }
 
 body {
-  background: var(--page-bg);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--grid-line) 64%, transparent) 1px, transparent 1px) center top / 42px 42px,
+    linear-gradient(0deg, color-mix(in srgb, var(--grid-line) 64%, transparent) 1px, transparent 1px) center top / 42px 42px,
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-bg) 36%, transparent), transparent 280px),
+    var(--page-bg);
   margin: 0;
   min-width: 320px;
 }
 
 #root {
   min-height: 100vh;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--text);
 }

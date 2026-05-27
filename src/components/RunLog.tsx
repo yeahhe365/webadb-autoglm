@@ -1,4 +1,4 @@
-import { RotateCcw, Trash2 } from 'lucide-react'
+import { Logs, Trash2 } from 'lucide-react'
 import type { LogEntry } from '../lib/runLogEntries'
 import { ScreenshotLightbox } from './ScreenshotLightbox'
 
@@ -13,10 +13,14 @@ export type RunLogLabels = {
   modelOutput: string
   openScreenshotFor: (title: string) => string
   parsedAction: string
+  resetScreenshotZoom: string
   screenshotDialogFor: (title: string) => string
   screenshotFor: (title: string) => string
+  screenshotZoomControls: string
   step: (step: number) => string
   title: string
+  zoomInScreenshot: string
+  zoomOutScreenshot: string
 }
 
 export type RunLogProps = {
@@ -47,17 +51,21 @@ export function RunLog({
     modelOutput: 'Model output',
     openScreenshotFor: (title: string) => `Open screenshot for ${title}`,
     parsedAction: 'Parsed action',
+    resetScreenshotZoom: 'Reset screenshot zoom',
     screenshotDialogFor: (title: string) => `Screenshot for ${title}`,
     screenshotFor: (title: string) => `Screenshot for ${title}`,
+    screenshotZoomControls: 'Screenshot zoom controls',
     step: (step: number) => `Step ${step}`,
     title: 'Run Log',
+    zoomInScreenshot: 'Zoom in screenshot',
+    zoomOutScreenshot: 'Zoom out screenshot',
   },
 }: RunLogProps) {
   return (
     <section className="log-section">
       <div className="panel-title log-title">
         <span>
-          <RotateCcw size={18} />
+          <Logs size={18} />
           <h2>{labels.title}</h2>
         </span>
         <button type="button" onClick={onClear} disabled={logs.length === 0}>
@@ -66,7 +74,12 @@ export function RunLog({
         </button>
       </div>
       <div className="log-list">
-        {logs.length === 0 ? <p className="muted">{labels.empty}</p> : null}
+        {logs.length === 0 ? (
+          <div className="log-empty-state">
+            <Logs size={20} strokeWidth={2} aria-hidden="true" />
+            <p>{labels.empty}</p>
+          </div>
+        ) : null}
         {logs.map((entry) => (
           <article
             className={`log-entry ${entry.tone}${entry.screenshot ? ' with-screenshot' : ''}`}
@@ -94,7 +107,11 @@ export function RunLog({
                       openButtonLabel={labels.openScreenshotFor(entry.title)}
                       dialogLabel={labels.screenshotDialogFor(entry.title)}
                       closeLabel={labels.closeScreenshotPreview}
+                      resetZoomLabel={labels.resetScreenshotZoom}
                       thumbnailClassName="log-screenshot-button"
+                      zoomControlsLabel={labels.screenshotZoomControls}
+                      zoomInLabel={labels.zoomInScreenshot}
+                      zoomOutLabel={labels.zoomOutScreenshot}
                     />
                   </div>
                 ) : null}

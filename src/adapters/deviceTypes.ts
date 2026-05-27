@@ -1,4 +1,7 @@
 import type { AgentAction, ScreenSize } from '../lib/actionTypes'
+import type { DeviceScreenTree } from './uiAutomator'
+
+export type { DeviceScreenTree } from './uiAutomator'
 
 export type DeviceInfo = {
   serial: string
@@ -32,6 +35,7 @@ export type DeviceCommandStep = readonly string[] | { waitMs: number }
 
 export type ExecuteActionOptions = {
   confirmSensitiveAction?: (message: string, action: AgentAction) => boolean | Promise<boolean>
+  signal?: AbortSignal
 }
 
 export type DeviceTimingConfig = {
@@ -56,6 +60,7 @@ export type DeviceBackend = {
   screenshot(): Promise<DeviceScreenshot>
   getCurrentApp(): Promise<string>
   getDeviceState(): Promise<DeviceState>
+  getScreenTree?(): Promise<DeviceScreenTree>
   getInputMethods?(): Promise<string>
   getInstalledApps?(): Promise<InstalledApp[]>
   installAdbKeyboard?(apkBytes: Uint8Array): Promise<string>

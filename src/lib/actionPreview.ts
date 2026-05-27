@@ -19,6 +19,12 @@ export function buildActionPreview(action: AgentAction): string {
       )}"${suffix}`
     case 'type_secret':
       return `${action.clear ? 'replace text with' : 'input'} secret "${action.secretId}"${suffix}`
+    case 'open_url':
+      return `open url ${truncate(action.url, 80)}${suffix}`
+    case 'set_clipboard':
+      return `set clipboard "${truncate(action.text, 48)}"${suffix}`
+    case 'paste':
+      return `paste${suffix}`
     case 'key':
       return `press ${action.key}${suffix}`
     case 'back':
@@ -41,6 +47,14 @@ export function buildActionPreview(action: AgentAction): string {
       return `call api: ${action.instruction}${suffix}`
     case 'custom_tool':
       return `custom tool ${action.tool}${suffix}`
+    case 'sequence': {
+      const previews = action.actions.map((child) => buildActionPreview(child)).join('; ')
+      return `sequence ${action.actions.length} action(s): ${truncate(previews, 120)}${suffix}`
+    }
+    case 'repeat':
+      return `repeat ${action.count}x ${buildActionPreview(action.actionToRepeat)}${
+        action.delayMs ? `, ${action.delayMs}ms delay` : ''
+      }${suffix}`
     case 'done':
       return `done${action.summary ? `: ${action.summary}` : ''}${suffix}`
   }

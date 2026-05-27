@@ -96,6 +96,7 @@ The app stores these values in the current browser's `localStorage`:
 - `Base URL`: OpenAI-compatible API endpoint, default `https://api.openai.com/v1`.
 - `API Key`: model API key.
 - `Model`: model name, default `gpt-5.5`.
+- `Thinking depth`: `reasoning_effort` for reasoning models such as GPT-5.5. Use the provider default, or choose `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`.
 - `Action protocol`: model action protocol, one of `webdroid_json`, `open_autoglm_function`, or `mobilerun_xml`.
 - `Max steps`: maximum auto-execution steps, default `50`.
 - `Confirm sensitive actions`: whether sensitive taps require human confirmation, default on.
@@ -162,6 +163,9 @@ Recommended canonical JSON actions:
 | `swipe` | Swipe from one point to another |
 | `input_text` | Type text; `clear:true` clears the currently focused field first |
 | `type_secret` | Type a local secret; the model sends only `secretId` and never sees the value |
+| `open_url` | Open a web URL or app deep link with Android `ACTION_VIEW` |
+| `set_clipboard` | Set WebDroid clipboard text and best-effort sync it to the device clipboard |
+| `paste` | Paste/type WebDroid clipboard text into the current focus |
 | `custom_tool` | Run a locally configured Custom Tool |
 | `key` | Send an Android key such as `BACK`, `HOME`, or `ENTER` |
 | `back` | Navigate back |
@@ -189,6 +193,10 @@ Examples:
 
 ```json
 { "action": "type_secret", "secretId": "gmail_password", "clear": true, "reason": "Type the configured local password" }
+```
+
+```json
+{ "action": "open_url", "url": "https://example.com/search?q=webdroid", "reason": "Open the target page directly" }
 ```
 
 The legacy compatibility layer still accepts `interact` and `call_api`, but they are not recommended real execution actions. `interact` is converted to `take_over`; `call_api` is converted to `take_over` with an unsupported-second-API-call message.
@@ -244,10 +252,13 @@ Open-AutoGLM coordinates use the `0-1000` relative coordinate space; canonical J
 
 - Launching apps: prefer the device's installed-app list, and also support built-in common app-name mappings or direct Android package names.
 - Tap and swipe: coordinates are validated against the screen bounds before execution.
+- Screen tree: each step best-effort reads `uiautomator dump --compressed` and injects visible text, descriptions, resource ids, clickable state, and bounds into the model context.
+- Opening URLs: uses Android `am start -a android.intent.action.VIEW -d <url>` for web URLs and registered deep links.
 - Long press: simulated with Android `input swipe x y x y duration`.
 - Double tap: two taps with a configurable delay in between.
 - Text input: simple ASCII text uses Android `input text`.
 - Clear-before-type, Chinese, and complex text: use ADB Keyboard or AutoGLM Keyboard broadcast input.
+- Clipboard: `set_clipboard` stores a local WebDroid clipboard and tries `cmd clipboard set`; `paste` prefers the local clipboard through the current text-input channel.
 - ADB Keyboard mode requires `com.android.adbkeyboard/.AdbIME` to be installed and enabled on the device; the device panel provides install and enable controls.
 - After every device action, the app waits according to the `Action settle` setting so the next step is less likely to run during animation or page loading.
 

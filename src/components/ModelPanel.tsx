@@ -1,4 +1,5 @@
-import { KeyRound } from 'lucide-react'
+import { useId, useState } from 'react'
+import { BrainCircuit, Eye, EyeOff } from 'lucide-react'
 import type { AppCopy } from '../lib/appCopy'
 import type { ActionProtocol } from '../lib/actionProtocol'
 import type { ModelConfig } from '../lib/openAiTypes'
@@ -22,10 +23,14 @@ export function ModelPanel({
   onStreamResponsesChange,
   streamResponses,
 }: ModelPanelProps) {
+  const apiKeyInputId = useId()
+  const [apiKeyVisible, setApiKeyVisible] = useState(false)
+  const apiKeyVisibilityLabel = apiKeyVisible ? copy.hideApiKey : copy.showApiKey
+
   return (
     <>
       <div className="panel-title">
-        <KeyRound size={18} />
+        <BrainCircuit size={18} />
         <h2>{copy.model}</h2>
       </div>
       <div className="model-box">
@@ -40,15 +45,27 @@ export function ModelPanel({
               placeholder="https://api.example.com/v1"
             />
           </label>
-          <label>
-            {copy.apiKey}
-            <input
-              value={modelConfig.apiKey}
-              onChange={(event) => onModelConfigChange('apiKey', event.target.value)}
-              placeholder="sk-..."
-              type="password"
-            />
-          </label>
+          <div className="api-key-setting">
+            <label htmlFor={apiKeyInputId}>{copy.apiKey}</label>
+            <div className="api-key-field">
+              <input
+                id={apiKeyInputId}
+                value={modelConfig.apiKey}
+                onChange={(event) => onModelConfigChange('apiKey', event.target.value)}
+                placeholder="sk-..."
+                type={apiKeyVisible ? 'text' : 'password'}
+              />
+              <button
+                type="button"
+                className="api-key-visibility-button"
+                aria-label={apiKeyVisibilityLabel}
+                title={apiKeyVisibilityLabel}
+                onClick={() => setApiKeyVisible((current) => !current)}
+              >
+                {apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
           <label>
             {copy.model}
             <input
@@ -56,6 +73,28 @@ export function ModelPanel({
               onChange={(event) => onModelConfigChange('model', event.target.value)}
               placeholder="vision-model"
             />
+          </label>
+          <label>
+            {copy.reasoningEffort}
+            <select
+              value={modelConfig.reasoningEffort ?? ''}
+              onChange={(event) =>
+                onModelConfigChange(
+                  'reasoningEffort',
+                  event.target.value
+                    ? (event.target.value as ModelConfig['reasoningEffort'])
+                    : undefined,
+                )
+              }
+            >
+              <option value="">{copy.reasoningEffortDefault}</option>
+              <option value="none">{copy.reasoningEffortNone}</option>
+              <option value="minimal">{copy.reasoningEffortMinimal}</option>
+              <option value="low">{copy.reasoningEffortLow}</option>
+              <option value="medium">{copy.reasoningEffortMedium}</option>
+              <option value="high">{copy.reasoningEffortHigh}</option>
+              <option value="xhigh">{copy.reasoningEffortXHigh}</option>
+            </select>
           </label>
           <label>
             {copy.actionProtocol}

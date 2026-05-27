@@ -1,8 +1,8 @@
 import {
-  CheckCircle2,
-  MousePointerClick,
-  ShieldCheck,
-  Smartphone,
+  BrainCircuit,
+  Cable,
+  Hand,
+  Send,
   X,
 } from 'lucide-react'
 import type { AppCopy } from '../lib/appCopy'
@@ -12,7 +12,7 @@ type TutorialPanelProps = {
   onClose: () => void
 }
 
-const stepIcons = [Smartphone, ShieldCheck, MousePointerClick, CheckCircle2] as const
+const stepIcons = [Cable, BrainCircuit, Send, Hand] as const
 
 export function TutorialPanel({ copy, onClose }: TutorialPanelProps) {
   return (

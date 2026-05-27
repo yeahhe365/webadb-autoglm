@@ -23,6 +23,7 @@ describe('preprocessScreenshotForModel', () => {
   it('resizes and encodes model screenshots as compressed JPEG by default', async () => {
     globalThis.Image = FakeImage as unknown as typeof Image
     const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'toBlob', { configurable: true, value: undefined })
     const context = {
       beginPath: vi.fn(),
       drawImage: vi.fn(),
@@ -57,10 +58,10 @@ describe('preprocessScreenshotForModel', () => {
 
     expect(createElement).toHaveBeenCalledWith('canvas')
     expect(getContext).toHaveBeenCalledWith('2d')
-    expect(canvas.width).toBe(716)
-    expect(canvas.height).toBe(1536)
     expect(context.drawImage).toHaveBeenCalledWith(expect.any(FakeImage), 0, 0, 716, 1536)
     expect(toDataURL).toHaveBeenCalledWith('image/jpeg', 0.82)
+    expect(canvas.width).toBe(0)
+    expect(canvas.height).toBe(0)
     expect(result).toEqual({
       modelDataUrl: 'data:image/jpeg;base64,compressed',
       modelScreen: { width: 716, height: 1536 },
@@ -71,6 +72,7 @@ describe('preprocessScreenshotForModel', () => {
   it('re-encodes unscaled PNG screenshots when grid drawing is disabled', async () => {
     globalThis.Image = FakeImage as unknown as typeof Image
     const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'toBlob', { configurable: true, value: undefined })
     vi.spyOn(document, 'createElement').mockReturnValue(canvas)
     vi.spyOn(canvas, 'getContext').mockReturnValue({
       drawImage: vi.fn(),

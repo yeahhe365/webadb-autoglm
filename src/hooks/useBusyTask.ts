@@ -12,7 +12,7 @@ export function useBusyTask(onError?: (error: BusyTaskError) => void) {
 
   const runTask = useCallback(
     async (id: BusyTaskId, label: string, action: () => Promise<void>) => {
-      setBusyTask({ id })
+      setBusyTask({ id, label, startedAt: Date.now() })
       setError(null)
       try {
         await action()

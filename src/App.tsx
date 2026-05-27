@@ -1,7 +1,17 @@
 import { AlertTriangle } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { WebAdbDeviceBackend } from './adapters/webAdbBackend'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+} from 'react'
+import { LazyWebAdbDeviceBackend } from './adapters/lazyWebAdbBackend'
 import type { AgentStep } from './lib/agent'
+import type { AgentAction } from './lib/actionTypes'
 import { createOpenAiClient } from './lib/openAiClient'
 import type { ModelConfig } from './lib/openAiTypes'
 import { APP_COPY, resolveLocale } from './lib/appCopy'
@@ -28,31 +38,52 @@ import { useConfigTargetScroll } from './hooks/useConfigTargetScroll'
 import { useDeviceController } from './hooks/useDeviceController'
 import { useAgentSessionHistory } from './hooks/useAgentSessionHistory'
 import { useBusyTask } from './hooks/useBusyTask'
+import { useBusyTaskDocumentTitle } from './hooks/useBusyTaskDocumentTitle'
 import { useDocumentPreferences } from './hooks/useDocumentPreferences'
 import { usePersistedSettings } from './hooks/usePersistedSettings'
 import { useRepositoryStats } from './hooks/useRepositoryStats'
 import { useRunLog } from './hooks/useRunLog'
 import { useStorageEstimate } from './hooks/useStorageEstimate'
 import { OPENAI_PROXY_URL } from './lib/openAiRuntimeConfig'
-import { loadSettings, type AppSettings } from './lib/settings'
-import { createDefaultActionToolRegistry } from './lib/toolRegistry'
+import { loadSettings, normalizeMaxSteps, type AppSettings } from './lib/settings'
+import { createDefaultActionToolRegistry, type ActionToolName } from './lib/toolRegistry'
+import { loadMemoryItems, rememberMemoryItem, saveMemoryItems } from './lib/memory'
 import { AppTopbar } from './components/AppTopbar'
 import { ConfigSidebar } from './components/ConfigSidebar'
+import { DeviceQuickControls } from './components/DeviceQuickControls'
 import { PhoneStage } from './components/PhoneStage'
 import { RunLog } from './components/RunLog'
 import { ConversationPanel } from './components/ConversationPanel'
-import { SettingsDialog } from './components/SettingsDialog'
-import { TutorialPanel } from './components/TutorialPanel'
+import {
+  SensitiveActionDialog,
+  type SensitiveActionDialogRequest,
+} from './components/SensitiveActionDialog'
+
+const SettingsDialog = lazy(() =>
+  import('./components/SettingsDialog').then((module) => ({ default: module.SettingsDialog })),
+)
+const TutorialPanel = lazy(() =>
+  import('./components/TutorialPanel').then((module) => ({ default: module.TutorialPanel })),
+)
+const ToolboxDialog = lazy(() =>
+  import('./components/ToolboxDialog').then((module) => ({ default: module.ToolboxDialog })),
+)
 
 function App() {
   const settings = useMemo(() => loadSettings(), [])
-  const [backend] = useState(() => new WebAdbDeviceBackend())
+  const [backend] = useState(() => new LazyWebAdbDeviceBackend())
   const client = useMemo(
     () => createOpenAiClient(globalThis.fetch, { proxyUrl: OPENAI_PROXY_URL }),
     [],
   )
-  const actionToolRegistry = useMemo(() => createDefaultActionToolRegistry(), [])
   const [actionProtocol, setActionProtocol] = useState<ActionProtocol>(settings.actionProtocol)
+  const [disabledActionTools, setDisabledActionTools] = useState<ActionToolName[]>(
+    settings.disabledActionTools,
+  )
+  const actionToolRegistry = useMemo(
+    () => createDefaultActionToolRegistry(disabledActionTools),
+    [disabledActionTools],
+  )
   const [appCards, setAppCards] = useState(() => loadAppCards())
   const [appCardsJson, setAppCardsJson] = useState(() => serializeAppCards(appCards))
   const [appCardsJsonError, setAppCardsJsonError] = useState<string | null>(null)
@@ -70,6 +101,8 @@ function App() {
   const [modelConfig, setModelConfig] = useState<ModelConfig>(settings.modelConfig)
   const [chatInput, setChatInput] = useState('')
   const [maxSteps, setMaxSteps] = useState(settings.maxSteps)
+  const [memoryEnabled, setMemoryEnabled] = useState(settings.memoryEnabled)
+  const [memoryItems, setMemoryItems] = useState(() => loadMemoryItems())
   const [screenBlackoutDuringAutoControl, setScreenBlackoutDuringAutoControl] = useState(
     settings.screenBlackoutDuringAutoControl,
   )
@@ -85,16 +118,39 @@ function App() {
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [tutorialOpen, setTutorialOpen] = useState(false)
+  const [toolboxOpen, setToolboxOpen] = useState(false)
+  const [runLogOpen, setRunLogOpen] = useState(false)
+  const runLogDrawerRef = useRef<HTMLDetailsElement | null>(null)
   const { repositoryStats, repositoryStatsStatus } = useRepositoryStats(settingsOpen)
   const { storageEstimate, storageEstimateStatus } = useStorageEstimate(settingsOpen)
 
   const activeLocale = useMemo(() => resolveLocale(languageMode), [languageMode])
   const copy = APP_COPY[activeLocale]
+  const [sensitiveActionRequest, setSensitiveActionRequest] =
+    useState<SensitiveActionDialogRequest | null>(null)
+  const sensitiveActionResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
+  const requestSensitiveActionConfirmation = useCallback(
+    (message: string, action: AgentAction) => {
+      sensitiveActionResolverRef.current?.(false)
+
+      return new Promise<boolean>((resolve) => {
+        sensitiveActionResolverRef.current = resolve
+        setSensitiveActionRequest({ action, message })
+      })
+    },
+    [],
+  )
+  const settleSensitiveActionRequest = useCallback((confirmed: boolean) => {
+    sensitiveActionResolverRef.current?.(confirmed)
+    sensitiveActionResolverRef.current = null
+    setSensitiveActionRequest(null)
+  }, [])
   const resetPendingStep = useCallback(() => setPendingStep(null), [])
   const device = useDeviceController({
     addLog,
     backend,
     busyTask,
+    confirmSensitiveActionRequest: requestSensitiveActionConfirmation,
     copy,
     initialSettings: settings,
     modelConfig,
@@ -115,11 +171,13 @@ function App() {
       actionProtocol,
       modelConfig,
       maxSteps,
+      memoryEnabled,
       preferAdbKeyboard,
       confirmSensitiveActions,
       unrestrictedMode,
       screenBlackoutDuringAutoControl,
       streamResponses,
+      disabledActionTools,
       actionSettleMs,
       doubleTapIntervalMs,
       keyboardStepMs,
@@ -130,10 +188,12 @@ function App() {
       actionProtocol,
       actionSettleMs,
       confirmSensitiveActions,
+      disabledActionTools,
       doubleTapIntervalMs,
       keyboardStepMs,
       languageMode,
       maxSteps,
+      memoryEnabled,
       modelConfig,
       preferAdbKeyboard,
       screenBlackoutDuringAutoControl,
@@ -143,10 +203,40 @@ function App() {
     ],
   )
   useDocumentPreferences(themeMode, activeLocale)
+  useBusyTaskDocumentTitle(busyTask)
   usePersistedSettings(currentSettings)
+  const modalOverlayOpen = settingsOpen || toolboxOpen || sensitiveActionRequest !== null
+  useEffect(() => {
+    if (!modalOverlayOpen) {
+      return
+    }
+
+    const previousOverflow = document.body.style.overflow
+    const previousOverscrollBehavior = document.body.style.overscrollBehavior
+    document.body.style.overflow = 'hidden'
+    document.body.style.overscrollBehavior = 'contain'
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.body.style.overscrollBehavior = previousOverscrollBehavior
+    }
+  }, [modalOverlayOpen])
   useEffect(() => saveAppCards(appCards), [appCards])
   useEffect(() => saveSecretRecords(secretRecords), [secretRecords])
   useEffect(() => saveCustomToolDefinitions(customTools), [customTools])
+  const rememberMemory = useCallback((information: string) => {
+    setMemoryItems((current) => {
+      const next = rememberMemoryItem(current, information)
+      saveMemoryItems(next)
+      return next
+    })
+  }, [])
+  useEffect(
+    () => () => {
+      sensitiveActionResolverRef.current?.(false)
+    },
+    [],
+  )
 
   const {
     activeThreadId,
@@ -181,7 +271,10 @@ function App() {
     device,
     ensureSession,
     maxSteps,
+    memoryEnabled,
+    memoryItems,
     modelConfig,
+    onMemoryItem: rememberMemory,
     pendingStep,
     runTask,
     setChatInput,
@@ -198,6 +291,10 @@ function App() {
     setModelConfig((current) => {
       return { ...current, [key]: value }
     })
+  }
+
+  function updateMaxSteps(value: number) {
+    setMaxSteps((current) => normalizeMaxSteps(value, current))
   }
 
   function updateAppCardsJson(value: string) {
@@ -284,12 +381,38 @@ function App() {
 
   function openSettings() {
     setTutorialOpen(false)
+    setToolboxOpen(false)
     setSettingsOpen(true)
   }
 
   function toggleTutorial() {
     setSettingsOpen(false)
+    setToolboxOpen(false)
     setTutorialOpen((current) => !current)
+  }
+
+  function openToolbox() {
+    setSettingsOpen(false)
+    setTutorialOpen(false)
+    setToolboxOpen(true)
+  }
+
+  function toggleRunLog(event: MouseEvent<HTMLElement>) {
+    event.preventDefault()
+    setRunLogOpen((current) => !current)
+  }
+
+  useEffect(() => {
+    if (!runLogOpen) {
+      return
+    }
+
+    runLogDrawerRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' })
+  }, [runLogOpen])
+
+  function handleStopRun() {
+    stopCurrentRun()
+    settleSensitiveActionRequest(false)
   }
 
   return (
@@ -302,42 +425,61 @@ function App() {
         onToggleTutorial={toggleTutorial}
       />
 
-      {settingsOpen ? (
-        <SettingsDialog
-          copy={copy}
-          appCardsJson={appCardsJson}
-          appCardsJsonError={appCardsJsonError}
-          customToolsJson={customToolsJson}
-          customToolsJsonError={customToolsJsonError}
-          languageMode={languageMode}
-          maxSteps={maxSteps}
-          screenBlackoutDuringAutoControl={screenBlackoutDuringAutoControl}
-          onAppCardsJsonChange={updateAppCardsJson}
-          onScreenBlackoutDuringAutoControlChange={setScreenBlackoutDuringAutoControl}
-          onCustomToolsJsonChange={updateCustomToolsJson}
-          onClearChatHistory={() => {
-            void clearChatHistoryFromSettings()
-          }}
-          onClearRunLog={clearLogs}
-          onClose={() => setSettingsOpen(false)}
-          onLanguageModeChange={setLanguageMode}
-          onMaxStepsChange={setMaxSteps}
-          onResetAppCards={resetAppCards}
-          onSecretRecordsJsonChange={updateSecretRecordsJson}
-          onThemeModeChange={setThemeMode}
-          repositoryStats={repositoryStats}
-          repositoryStatsStatus={repositoryStatsStatus}
-          storageEstimate={storageEstimate}
-          storageEstimateStatus={storageEstimateStatus}
-          secretRecordsJson={secretRecordsJson}
-          secretRecordsJsonError={secretRecordsJsonError}
-          themeMode={themeMode}
-        />
-      ) : null}
+      <Suspense fallback={null}>
+        {settingsOpen ? (
+          <SettingsDialog
+            copy={copy}
+            appCardsJson={appCardsJson}
+            appCardsJsonError={appCardsJsonError}
+            customToolsJson={customToolsJson}
+            customToolsJsonError={customToolsJsonError}
+            languageMode={languageMode}
+            maxSteps={maxSteps}
+            disabledActionTools={disabledActionTools}
+            onAppCardsJsonChange={updateAppCardsJson}
+            onCustomToolsJsonChange={updateCustomToolsJson}
+            onDisabledActionToolsChange={setDisabledActionTools}
+            onClearChatHistory={() => {
+              void clearChatHistoryFromSettings()
+            }}
+            onClearRunLog={clearLogs}
+            onClose={() => setSettingsOpen(false)}
+            onLanguageModeChange={setLanguageMode}
+            onMaxStepsChange={updateMaxSteps}
+            onResetAppCards={resetAppCards}
+            onSecretRecordsJsonChange={updateSecretRecordsJson}
+            onThemeModeChange={setThemeMode}
+            repositoryStats={repositoryStats}
+            repositoryStatsStatus={repositoryStatsStatus}
+            storageEstimate={storageEstimate}
+            storageEstimateStatus={storageEstimateStatus}
+            secretRecordsJson={secretRecordsJson}
+            secretRecordsJsonError={secretRecordsJsonError}
+            themeMode={themeMode}
+          />
+        ) : null}
 
-      {tutorialOpen ? (
-        <TutorialPanel copy={copy} onClose={() => setTutorialOpen(false)} />
-      ) : null}
+        {tutorialOpen ? (
+          <TutorialPanel copy={copy} onClose={() => setTutorialOpen(false)} />
+        ) : null}
+
+        {toolboxOpen ? (
+          <ToolboxDialog
+            actions={device.actions}
+            copy={copy}
+            onClose={() => setToolboxOpen(false)}
+            options={device.options}
+            state={device.state}
+          />
+        ) : null}
+      </Suspense>
+
+      <SensitiveActionDialog
+        copy={copy}
+        request={sensitiveActionRequest}
+        onCancel={() => settleSensitiveActionRequest(false)}
+        onConfirm={() => settleSensitiveActionRequest(true)}
+      />
 
       {error ? (
         <div className="alert">
@@ -353,26 +495,39 @@ function App() {
       >
         <ConfigSidebar
           copy={copy}
-          devicePanelActions={device.actions}
-          devicePanelOptions={device.options}
-          devicePanelState={device.state}
+          deviceActions={device.actions}
+          deviceOptions={device.options}
+          deviceState={device.state}
           isOpen={configSidebarOpen}
+          memoryEnabled={memoryEnabled}
           modelConfig={modelConfig}
           actionProtocol={actionProtocol}
           onModelConfigChange={updateConfig}
           onActionProtocolChange={setActionProtocol}
+          onMemoryEnabledChange={setMemoryEnabled}
+          onOpenToolbox={openToolbox}
+          onScreenBlackoutDuringAutoControlChange={setScreenBlackoutDuringAutoControl}
           onSelectTarget={openConfigTarget}
           onStreamResponsesChange={setStreamResponses}
           onToggleOpen={() => setConfigSidebarOpen((current) => !current)}
+          screenBlackoutDuringAutoControl={screenBlackoutDuringAutoControl}
           streamResponses={streamResponses}
         />
 
-        <PhoneStage
-          copy={copy}
-          displayedScreenshot={device.displayedScreenshot}
-          onRunInteractiveAction={device.runScreenshotAction}
-          pendingStep={pendingStep}
-        />
+        <div className="phone-column">
+          <PhoneStage
+            copy={copy}
+            displayedScreenshot={device.displayedScreenshot}
+            onRunInteractiveAction={device.runScreenshotAction}
+            pendingStep={pendingStep}
+          />
+          <DeviceQuickControls
+            busyTask={busyTask}
+            connected={device.connected}
+            copy={copy}
+            onRunDirectAction={device.actions.onRunDirectAction}
+          />
+        </div>
 
         <ConversationPanel
           activeThreadId={activeThreadId}
@@ -392,7 +547,7 @@ function App() {
             void selectHistoryThread(threadId)
           }}
           onStartNewChat={startNewChat}
-          onStopRun={stopCurrentRun}
+          onStopRun={handleStopRun}
           onSubmitChatMessage={submitChatMessage}
           onToggleHistorySidebar={() => setHistorySidebarOpen((current) => !current)}
           pendingStep={pendingStep}
@@ -400,29 +555,35 @@ function App() {
         />
       </section>
 
-      <details className="log-drawer compact-section">
-        <summary>
+      <details className="log-drawer compact-section" open={runLogOpen} ref={runLogDrawerRef}>
+        <summary onClick={toggleRunLog}>
           <span>{copy.runLog}</span>
           <small>{logs[0]?.title ?? copy.noEvents}</small>
         </summary>
-        <RunLog
-          logs={logs}
-          onClear={clearLogs}
-          labels={{
-            clear: copy.clear,
-            closeScreenshotPreview: copy.closeScreenshotPreview,
-            empty: copy.noEvents,
-            executionResult: copy.stepExecutionResult,
-            expandedScreenshotFor: (title) => `${copy.expandedAndroidScreenshot}: ${title}`,
-            modelOutput: copy.stepModelOutput,
-            openScreenshotFor: copy.openScreenshotFor,
-            parsedAction: copy.stepParsedAction,
-            screenshotDialogFor: copy.screenshotDialogFor,
-            screenshotFor: (title) => `${copy.androidScreenshot}: ${title}`,
-            step: (step) => `${copy.step} ${step}`,
-            title: copy.runLog,
-          }}
-        />
+        {runLogOpen ? (
+          <RunLog
+            logs={logs}
+            onClear={clearLogs}
+            labels={{
+              clear: copy.clear,
+              closeScreenshotPreview: copy.closeScreenshotPreview,
+              empty: copy.noEvents,
+              executionResult: copy.stepExecutionResult,
+              expandedScreenshotFor: (title) => `${copy.expandedAndroidScreenshot}: ${title}`,
+              modelOutput: copy.stepModelOutput,
+              openScreenshotFor: copy.openScreenshotFor,
+              parsedAction: copy.stepParsedAction,
+              resetScreenshotZoom: copy.resetScreenshotZoom,
+              screenshotDialogFor: copy.screenshotDialogFor,
+              screenshotFor: (title) => `${copy.androidScreenshot}: ${title}`,
+              screenshotZoomControls: copy.screenshotZoomControls,
+              step: (step) => `${copy.step} ${step}`,
+              title: copy.runLog,
+              zoomInScreenshot: copy.zoomInScreenshot,
+              zoomOutScreenshot: copy.zoomOutScreenshot,
+            }}
+          />
+        ) : null}
       </details>
     </main>
   )

@@ -58,6 +58,9 @@ const MUTATING_ACTIONS = new Set<AgentAction['action']>([
   'long_press',
   'double_tap',
   'input_text',
+  'open_url',
+  'paste',
+  'set_clipboard',
   'key',
 ])
 
@@ -130,6 +133,8 @@ function collectPolicyEvidence(action: AgentAction, context: ActionSafetyContext
     'reason' in action ? action.reason : undefined,
     action.action === 'tap' ? action.message : undefined,
     action.action === 'input_text' ? action.text : undefined,
+    action.action === 'set_clipboard' ? action.text : undefined,
+    action.action === 'open_url' ? action.url : undefined,
     action.action === 'launch' ? action.app : undefined,
     action.action === 'key' ? action.key : undefined,
   ]

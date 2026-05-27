@@ -1,4 +1,4 @@
-import { Maximize2, X } from 'lucide-react'
+import { Maximize2, Minus, Plus, RotateCcw, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode, type WheelEvent } from 'react'
 
 export type ScreenshotSource = {
@@ -17,7 +17,11 @@ export type ScreenshotLightboxProps = {
   openButtonLabel?: string
   dialogLabel?: string
   closeLabel?: string
+  resetZoomLabel?: string
   thumbnailClassName: string
+  zoomControlsLabel?: string
+  zoomInLabel?: string
+  zoomOutLabel?: string
   overlayClassName?: string
   modalClassName?: string
   panelClassName?: string
@@ -34,7 +38,11 @@ export function ScreenshotLightbox({
   openButtonLabel,
   dialogLabel,
   closeLabel = 'Close screenshot preview',
+  resetZoomLabel = 'Reset screenshot zoom',
   thumbnailClassName,
+  zoomControlsLabel = 'Screenshot zoom controls',
+  zoomInLabel = 'Zoom in screenshot',
+  zoomOutLabel = 'Zoom out screenshot',
   overlayClassName = 'log-screenshot-overlay',
   modalClassName = 'screenshot-modal',
   panelClassName = 'screenshot-modal-panel',
@@ -66,13 +74,17 @@ export function ScreenshotLightbox({
     setOpen(true)
   }
 
+  function updateZoom(delta: number) {
+    setZoom((current) => {
+      const next = current + delta
+      return Math.min(4, Math.max(0.5, Math.round(next * 100) / 100))
+    })
+  }
+
   function zoomScreenshot(event: WheelEvent) {
     event.preventDefault()
     const direction = event.deltaY < 0 ? 1 : -1
-    setZoom((current) => {
-      const next = current + direction * 0.15
-      return Math.min(4, Math.max(0.5, Math.round(next * 100) / 100))
-    })
+    updateZoom(direction * 0.15)
   }
 
   return (
@@ -106,14 +118,46 @@ export function ScreenshotLightbox({
                   {screenshot.screen.width}x{screenshot.screen.height}
                 </small>
               </div>
-              <button
-                type="button"
-                className={closeClassName}
-                onClick={() => setOpen(false)}
-                aria-label={closeLabel}
-              >
-                <X size={16} />
-              </button>
+              <div className="screenshot-modal-toolbar">
+                <div className="screenshot-modal-zoom-controls" aria-label={zoomControlsLabel}>
+                  <button
+                    type="button"
+                    aria-label={zoomOutLabel}
+                    title={zoomOutLabel}
+                    onClick={() => updateZoom(-0.25)}
+                    disabled={zoom <= 0.5}
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <span>{zoomPercent}%</span>
+                  <button
+                    type="button"
+                    aria-label={zoomInLabel}
+                    title={zoomInLabel}
+                    onClick={() => updateZoom(0.25)}
+                    disabled={zoom >= 4}
+                  >
+                    <Plus size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={resetZoomLabel}
+                    title={resetZoomLabel}
+                    onClick={() => setZoom(1)}
+                    disabled={zoom === 1}
+                  >
+                    <RotateCcw size={14} />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className={closeClassName}
+                  onClick={() => setOpen(false)}
+                  aria-label={closeLabel}
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
             <div className="screenshot-modal-viewport" onWheel={zoomScreenshot}>
               <img

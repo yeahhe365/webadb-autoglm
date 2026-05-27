@@ -11,6 +11,7 @@ import {
   type ActionSafetyDecision,
 } from './actionSafetyPolicy'
 import type { AgentAction } from './actionTypes'
+import { delayWithAbort, isAbortError, throwIfAborted, withAbort } from './abortSignal'
 
 export type ActionToolParameter = {
   type: 'string' | 'number' | 'boolean' | 'object' | 'list'
@@ -37,16 +38,15 @@ export type ActionToolContext = {
   customTools?: readonly CustomToolDefinition[]
   safetyContext?: ActionSafetyContext
   secrets?: readonly SecretRecord[]
+  signal?: AbortSignal
   unrestrictedMode?: boolean
 }
-
-type ActionToolName = AgentAction['action']
 
 type ActionToolEntry<Action extends AgentAction = AgentAction> = ActionToolSignature & {
   execute: (action: Action, context: ActionToolContext) => Promise<string> | string
 }
 
-const DEFAULT_ACTION_TOOL_SIGNATURES: Partial<Record<ActionToolName, ActionToolSignature>> = {
+export const DEFAULT_ACTION_TOOL_SIGNATURES = {
   launch: {
     description: 'Launch an Android app by common app name or package name.',
     parameters: {
@@ -96,6 +96,22 @@ const DEFAULT_ACTION_TOOL_SIGNATURES: Partial<Record<ActionToolName, ActionToolS
         description: 'Clear the currently focused field before typing.',
       },
     },
+  },
+  open_url: {
+    description: 'Open a web URL or Android deep link with ACTION_VIEW.',
+    parameters: {
+      url: { type: 'string', required: true, description: 'URL or deep link with a URI scheme.' },
+    },
+  },
+  set_clipboard: {
+    description: 'Set WebDroid clipboard text for the next paste action and best-effort device clipboard sync.',
+    parameters: {
+      text: { type: 'string', required: true, description: 'Text to place on the clipboard.' },
+    },
+  },
+  paste: {
+    description: 'Paste clipboard text into the focused field.',
+    parameters: {},
   },
   key: {
     description: 'Send an Android key event.',
@@ -161,12 +177,56 @@ const DEFAULT_ACTION_TOOL_SIGNATURES: Partial<Record<ActionToolName, ActionToolS
       input: { type: 'object', required: false, description: 'Tool input payload.' },
     },
   },
+  sequence: {
+    description: 'Run a bounded list of already-supported actions sequentially.',
+    parameters: {
+      actions: {
+        type: 'list',
+        required: true,
+        description: 'Array of supported atomic action objects to execute in order.',
+      },
+    },
+  },
+  repeat: {
+    description: 'Repeat one already-supported atomic action a bounded number of times.',
+    parameters: {
+      count: {
+        type: 'number',
+        required: true,
+        description: 'Number of times to repeat the action, between 1 and 10.',
+      },
+      actionToRepeat: {
+        type: 'object',
+        required: true,
+        description: 'Supported atomic action object to repeat.',
+      },
+      delayMs: {
+        type: 'number',
+        required: false,
+        default: 0,
+        description: 'Optional delay between repeats, capped at 5000ms.',
+      },
+    },
+  },
   done: {
     description: 'Mark the task as complete.',
     parameters: {
       summary: { type: 'string', required: false },
     },
   },
+} satisfies Partial<Record<AgentAction['action'], ActionToolSignature>>
+
+export type ActionToolName = keyof typeof DEFAULT_ACTION_TOOL_SIGNATURES
+
+export const DEFAULT_ACTION_TOOL_NAMES = Object.keys(
+  DEFAULT_ACTION_TOOL_SIGNATURES,
+) as ActionToolName[]
+
+export function isActionToolName(value: unknown): value is ActionToolName {
+  return (
+    typeof value === 'string' &&
+    (DEFAULT_ACTION_TOOL_NAMES as readonly string[]).includes(value)
+  )
 }
 
 export class ActionToolRegistry {
@@ -177,7 +237,7 @@ export class ActionToolRegistry {
     this.#disabled = new Set(disabledTools)
   }
 
-  register<Action extends AgentAction>(
+  register<Action extends Extract<AgentAction, { action: ActionToolName }>>(
     name: Action['action'],
     entry: ActionToolEntry<Action>,
   ) {
@@ -206,6 +266,8 @@ export class ActionToolRegistry {
   }
 
   async execute(action: AgentAction, context: ActionToolContext): Promise<ActionToolResult> {
+    throwIfAborted(context.signal)
+
     const toolName = action.action
     if (action.action === 'interact') {
       if (context.unrestrictedMode) {
@@ -231,6 +293,14 @@ export class ActionToolRegistry {
       }
     }
 
+    if (!isActionToolName(toolName)) {
+      return {
+        toolName,
+        success: false,
+        summary: `Unknown tool: ${toolName}.`,
+      }
+    }
+
     const entry = this.#tools.get(toolName)
     if (!entry) {
       return {
@@ -246,6 +316,10 @@ export class ActionToolRegistry {
         success: false,
         summary: `Tool "${toolName}" is disabled.`,
       }
+    }
+
+    if (action.action === 'sequence' || action.action === 'repeat') {
+      return this.#executeCompositeAction(action, context)
     }
 
     const safety = context.unrestrictedMode
@@ -264,7 +338,10 @@ export class ActionToolRegistry {
     if (safety.decision === 'confirm') {
       const message = safety.message ?? `Safety policy requires confirmation before ${toolName}.`
       const confirmed = context.confirmSensitiveAction
-        ? await context.confirmSensitiveAction(message, action)
+        ? await withAbort(
+            Promise.resolve(context.confirmSensitiveAction(message, action)),
+            context.signal,
+          )
         : false
       if (!confirmed) {
         return {
@@ -278,21 +355,72 @@ export class ActionToolRegistry {
     }
 
     try {
-      const summary = await entry.execute(action, {
-        ...context,
-        confirmSensitiveAction: safetyConfirmed ? () => true : context.confirmSensitiveAction,
-      })
+      throwIfAborted(context.signal)
+      const summary = await withAbort(
+        Promise.resolve(
+          entry.execute(action, {
+            ...context,
+            confirmSensitiveAction: safetyConfirmed ? () => true : context.confirmSensitiveAction,
+          }),
+        ),
+        context.signal,
+      )
       return {
         toolName,
         success: true,
         summary,
       }
     } catch (caught) {
+      if (isAbortError(caught)) {
+        throw caught
+      }
       return {
         toolName,
         success: false,
         summary: caught instanceof Error ? caught.message : String(caught),
       }
+    }
+  }
+
+  async #executeCompositeAction(
+    action: Extract<AgentAction, { action: 'sequence' | 'repeat' }>,
+    context: ActionToolContext,
+  ): Promise<ActionToolResult> {
+    const summaries: string[] = []
+    const childActions =
+      action.action === 'sequence'
+        ? action.actions
+        : Array.from({ length: action.count }, () => ({ ...action.actionToRepeat }))
+
+    for (const [index, childAction] of childActions.entries()) {
+      throwIfAborted(context.signal)
+      const result = await this.execute(childAction, context)
+      const stepLabel =
+        action.action === 'repeat'
+          ? `repeat ${index + 1}/${childActions.length}`
+          : `action ${index + 1}/${childActions.length}`
+      summaries.push(`${stepLabel} ${result.toolName}: ${result.summary}`)
+
+      if (!result.success) {
+        return {
+          toolName: action.action,
+          success: false,
+          summary: [`${action.action} stopped at ${stepLabel}.`, ...summaries].join('\n'),
+          ...(result.safetyDecision ? { safetyDecision: result.safetyDecision } : {}),
+        }
+      }
+
+      if (action.action === 'repeat' && action.delayMs && index < childActions.length - 1) {
+        await delayWithAbort(action.delayMs, context.signal)
+      }
+    }
+
+    return {
+      toolName: action.action,
+      success: true,
+      summary: [`${action.action} completed ${childActions.length} action(s).`, ...summaries].join(
+        '\n',
+      ),
     }
   }
 }
@@ -321,6 +449,8 @@ async function executeDefaultAction(action: AgentAction, context: ActionToolCont
       text: secret,
       clear: action.clear,
       reason: action.reason,
+    }, {
+      signal: context.signal,
     })
     return `Typed secret "${action.secretId}".`
   }
@@ -335,6 +465,7 @@ async function executeDefaultAction(action: AgentAction, context: ActionToolCont
 
   return context.device.execute(action, {
     confirmSensitiveAction: context.confirmSensitiveAction,
+    signal: context.signal,
   })
 }
 

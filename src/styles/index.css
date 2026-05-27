@@ -3,6 +3,7 @@
 @import './controls.css';
 @import './compact-section.css';
 @import './settings-dialog.css';
+@import './toolbox-dialog.css';
 @import './config-panel.css';
 @import './config-rail.css';
 @import './model-panel.css';
@@ -19,6 +20,7 @@
 @import './markdown-content.css';
 @import './agent-step-card.css';
 @import './tutorial-panel.css';
+@import './sensitive-action-dialog.css';
 @import './run-log.css';
 @import './screenshot-lightbox.css';
 @import './responsive.css';

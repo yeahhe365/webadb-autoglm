@@ -44,32 +44,108 @@ export async function preprocessScreenshotForModel({
   canvas.width = modelScreen.width
   canvas.height = modelScreen.height
 
-  const context = canvas.getContext('2d')
-  if (!context) {
-    throw new Error('Could not create screenshot preprocessing canvas.')
-  }
+  try {
+    const context = canvas.getContext('2d')
+    if (!context) {
+      throw new Error('Could not create screenshot preprocessing canvas.')
+    }
 
-  context.imageSmoothingEnabled = true
-  context.imageSmoothingQuality = 'high'
-  context.drawImage(image, 0, 0, modelScreen.width, modelScreen.height)
+    context.imageSmoothingEnabled = true
+    context.imageSmoothingQuality = 'high'
+    context.drawImage(image, 0, 0, modelScreen.width, modelScreen.height)
 
-  if (drawGrid) {
-    drawCoordinateGrid(context, modelScreen, modelGridDivisions)
-  }
+    if (drawGrid) {
+      drawCoordinateGrid(context, modelScreen, modelGridDivisions)
+    }
 
-  return {
-    modelDataUrl: canvas.toDataURL(mimeType, quality),
-    modelScreen,
-    modelGridDivisions,
+    return {
+      modelDataUrl: await encodeCanvasDataUrl(canvas, mimeType, quality),
+      modelScreen,
+      modelGridDivisions,
+    }
+  } finally {
+    if (typeof image.removeAttribute === 'function') {
+      image.removeAttribute('src')
+    }
+    canvas.width = 0
+    canvas.height = 0
   }
 }
+
+const CANVAS_TO_BLOB_FALLBACK_MS = 250
 
 function loadImage(dataUrl: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('Could not load screenshot for preprocessing.'))
+    image.decoding = 'async'
+    image.onload = () => {
+      image.onload = null
+      image.onerror = null
+      resolve(image)
+    }
+    image.onerror = () => {
+      image.onload = null
+      image.onerror = null
+      reject(new Error('Could not load screenshot for preprocessing.'))
+    }
     image.src = dataUrl
+  })
+}
+
+function encodeCanvasDataUrl(
+  canvas: HTMLCanvasElement,
+  mimeType: string,
+  quality: number,
+) {
+  if (typeof canvas.toBlob !== 'function') {
+    return Promise.resolve(canvas.toDataURL(mimeType, quality))
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    let settled = false
+    const finish = (result: string) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      clearTimeout(fallbackTimer)
+      resolve(result)
+    }
+    const fail = (error: Error) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      clearTimeout(fallbackTimer)
+      reject(error)
+    }
+    const fallbackTimer = setTimeout(() => {
+      finish(canvas.toDataURL(mimeType, quality))
+    }, CANVAS_TO_BLOB_FALLBACK_MS)
+
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          fail(new Error('Could not encode screenshot preprocessing canvas.'))
+          return
+        }
+
+        const reader = new FileReader()
+        reader.onload = () => {
+          const result = reader.result
+          if (typeof result === 'string') {
+            finish(result)
+            return
+          }
+          fail(new Error('Could not read screenshot preprocessing blob.'))
+        }
+        reader.onerror = () =>
+          fail(reader.error ?? new Error('Could not read screenshot preprocessing blob.'))
+        reader.readAsDataURL(blob)
+      },
+      mimeType,
+      quality,
+    )
   })
 }
 

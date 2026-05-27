@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { DeviceScreenshot } from '../adapters/deviceTypes'
 import type { AgentAction } from './actionTypes'
-import { createAgentThread, recordThreadUserMessage, startThreadTurn } from './agentThread'
+import {
+  addThreadEvent,
+  createAgentThread,
+  recordThreadTurnExecution,
+  recordThreadUserMessage,
+  startThreadTurn,
+} from './agentThread'
 import {
   createMemoryThreadStore,
   createSettingsSnapshot,
@@ -102,6 +108,67 @@ describe('thread store', () => {
     expect(loaded?.events.find((event) => event.type === 'device_snapshot')).not.toHaveProperty(
       'screenshot',
     )
+    expect(loaded?.events.find((event) => event.type === 'assistant_action')).not.toHaveProperty(
+      'modelOutput',
+    )
+  })
+
+  it('persists compact thread records instead of retaining old large fields', async () => {
+    const store = createMemoryThreadStore()
+    const thread = createAgentThread('Long task', { id: 'thread-large', now: 1000 })
+    const action: AgentAction = { action: 'wait', ms: 100 }
+    const longText = 'x'.repeat(9000)
+
+    for (let index = 1; index <= 14; index += 1) {
+      const turn = startThreadTurn(thread, {
+        id: `turn-${index}`,
+        index,
+        task: 'Long task',
+        promptContext: `prompt-${index}-${longText}`,
+        modelOutput: `model-${index}-${longText}`,
+        action,
+        executionAction: action,
+        preview: `wait ${index}`,
+        deviceSnapshot: {
+          currentApp: 'Chrome',
+          deviceState: { app: 'Chrome' },
+        },
+        timing: { captureMs: 1, currentAppMs: 2, modelMs: 3, parseMs: 4, totalMs: 10 },
+        now: 1000 + index,
+      })
+      recordThreadTurnExecution(thread, turn.id, {
+        executionResult: `result-${index}-${longText}`,
+        success: true,
+        now: 2000 + index,
+      })
+    }
+
+    for (let index = 0; index < 260; index += 1) {
+      addThreadEvent(
+        thread,
+        {
+          type: 'status_change',
+          status: 'running',
+          message: `status ${index}`,
+        },
+        { now: 3000 + index },
+      )
+    }
+
+    await store.save(thread)
+    const loaded = await store.load('thread-large')
+
+    expect(loaded?.turns[0].promptContext).toBe('')
+    expect(loaded?.turns[0].modelOutput).toBe('')
+    expect(loaded?.turns.at(-1)?.promptContext).toBe('')
+    expect(loaded?.turns.at(-1)?.modelOutput).toContain('model-14')
+    expect(loaded?.turns.at(-1)?.modelOutput.length).toBeLessThan(thread.turns.at(-1)?.modelOutput.length ?? 0)
+    expect(
+      loaded?.messages
+        .filter((message) => message.role === 'observation')
+        .every((message) => message.content.length <= 4000),
+    ).toBe(true)
+    expect(loaded?.events.length).toBeLessThanOrEqual(240)
   })
 
   it('creates redacted settings snapshots without API keys', () => {
@@ -110,6 +177,7 @@ describe('thread store', () => {
         baseUrl: 'https://api.example.com/v1',
         apiKey: 'secret-key',
         model: 'vision-model',
+        reasoningEffort: 'xhigh',
         stream: true,
       },
       autoExecute: true,
@@ -126,6 +194,7 @@ describe('thread store', () => {
       modelConfig: {
         baseUrl: 'https://api.example.com/v1',
         model: 'vision-model',
+        reasoningEffort: 'xhigh',
         stream: true,
       },
       autoExecute: true,

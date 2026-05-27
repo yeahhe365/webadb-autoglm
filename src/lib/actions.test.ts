@@ -107,6 +107,32 @@ describe('parseModelAction', () => {
     })
   })
 
+  it('parses multiple mobilerun XML invokes as one sequence action', () => {
+    expect(
+      parseModelAction(
+        [
+          '<function_calls>',
+          '<invoke name="click_at">',
+          '<parameter name="x">100</parameter>',
+          '<parameter name="y">200</parameter>',
+          '</invoke>',
+          '<invoke name="type_text">',
+          '<parameter name="text">hello</parameter>',
+          '<parameter name="clear">true</parameter>',
+          '</invoke>',
+          '</function_calls>',
+        ].join(''),
+        screen,
+      ),
+    ).toEqual({
+      action: 'sequence',
+      actions: [
+        { action: 'tap', x: 100, y: 200 },
+        { action: 'input_text', text: 'hello', clear: true },
+      ],
+    })
+  })
+
   it('normalizes Open-AutoGLM Interact and Call_API actions to takeover', () => {
     expect(parseModelAction('do(action="Interact", message="请选择联系人")', screen)).toEqual({
       action: 'take_over',
@@ -172,6 +198,31 @@ describe('validateAction', () => {
     })
   })
 
+  it('accepts URL, clipboard, and paste actions', () => {
+    expect(validateAction({ action: 'open_url', url: 'https://example.com/search?q=webdroid' })).toEqual({
+      action: 'open_url',
+      url: 'https://example.com/search?q=webdroid',
+    })
+    expect(parseModelAction('do(action="Open URL", url="myapp://detail/123")')).toEqual({
+      action: 'open_url',
+      url: 'myapp://detail/123',
+    })
+    expect(validateAction({ action: 'set_clipboard', text: '测试\nhello' })).toEqual({
+      action: 'set_clipboard',
+      text: '测试\nhello',
+    })
+    expect(validateAction({ action: 'paste' })).toEqual({ action: 'paste' })
+  })
+
+  it('rejects unsafe URL and clipboard actions', () => {
+    expect(() => validateAction({ action: 'open_url', url: 'example.com' }, screen)).toThrow(
+      'URI scheme',
+    )
+    expect(() => validateAction({ action: 'set_clipboard', text: 'bad\0text' }, screen)).toThrow(
+      'null characters',
+    )
+  })
+
   it('rejects non-boolean input clear values', () => {
     expect(() =>
       validateAction({ action: 'input_text', text: 'hello', clear: 'yes' }, screen),
@@ -182,6 +233,77 @@ describe('validateAction', () => {
     expect(() => validateAction({ action: 'shell', command: 'rm -rf /' }, screen)).toThrow(
       'Unsupported action',
     )
+  })
+
+  it('accepts bounded sequence and repeat actions', () => {
+    expect(
+      validateAction(
+        {
+          action: 'sequence',
+          actions: [
+            { action: 'tap', x: 100, y: 200 },
+            { action: 'input_text', text: 'hello' },
+          ],
+          reason: 'fill form',
+        },
+        screen,
+      ),
+    ).toEqual({
+      action: 'sequence',
+      actions: [
+        { action: 'tap', x: 100, y: 200 },
+        { action: 'input_text', text: 'hello' },
+      ],
+      reason: 'fill form',
+    })
+
+    expect(
+      validateAction(
+        {
+          action: 'repeat',
+          count: 3,
+          actionToRepeat: { action: 'swipe', direction: 'up' },
+          delay: 0.25,
+        },
+        screen,
+      ),
+    ).toEqual({
+      action: 'repeat',
+      count: 3,
+      actionToRepeat: {
+        action: 'swipe',
+        fromX: 540,
+        fromY: 1800,
+        toX: 540,
+        toY: 600,
+        durationMs: 400,
+      },
+      delayMs: 250,
+    })
+  })
+
+  it('rejects unsafe or unbounded composite actions', () => {
+    expect(() =>
+      validateAction({ action: 'repeat', count: 11, actionToRepeat: { action: 'back' } }, screen),
+    ).toThrow('between 1 and 10')
+
+    expect(() =>
+      validateAction({
+        action: 'sequence',
+        actions: [{ action: 'tap', x: 100, y: 200 }, { action: 'done' }],
+      }, screen),
+    ).toThrow('cannot be used inside a composite action')
+
+    expect(() =>
+      validateAction({
+        action: 'repeat',
+        count: 2,
+        actionToRepeat: {
+          action: 'sequence',
+          actions: [{ action: 'back' }],
+        },
+      }, screen),
+    ).toThrow('Composite actions cannot be nested')
   })
 
   it('preserves sensitive tap metadata for confirmation before execution', () => {
@@ -327,6 +449,17 @@ describe('validateAction', () => {
       action: 'custom_tool',
       tool: 'lookup_order',
     })
+    expect(validateAction({ action: 'open_url', url: 'https://example.com' }, screen)).toEqual({
+      action: 'open_url',
+      url: 'https://example.com',
+    })
+    expect(validateAction({ action: 'set_clipboard', text: 'hello' }, screen)).toEqual({
+      action: 'set_clipboard',
+      text: 'hello',
+    })
+    expect(validateAction({ action: 'paste' }, screen)).toEqual({
+      action: 'paste',
+    })
   })
 })
 
@@ -350,6 +483,30 @@ describe('buildActionPreview', () => {
     expect(buildActionPreview({ action: 'input_text', text: 'query', clear: true })).toBe(
       'replace text with "query"',
     )
+    expect(buildActionPreview({ action: 'open_url', url: 'https://example.com' })).toBe(
+      'open url https://example.com',
+    )
+    expect(buildActionPreview({ action: 'set_clipboard', text: 'copy me' })).toBe(
+      'set clipboard "copy me"',
+    )
+    expect(buildActionPreview({ action: 'paste' })).toBe('paste')
+    expect(
+      buildActionPreview({
+        action: 'sequence',
+        actions: [
+          { action: 'tap', x: 100, y: 200 },
+          { action: 'input_text', text: 'hello' },
+        ],
+      }),
+    ).toBe('sequence 2 action(s): tap (100, 200); input text "hello"')
+    expect(
+      buildActionPreview({
+        action: 'repeat',
+        count: 2,
+        actionToRepeat: { action: 'back' },
+        delayMs: 100,
+      }),
+    ).toBe('repeat 2x back, 100ms delay')
     expect(buildActionPreview({ action: 'take_over', message: 'captcha' })).toBe(
       'take over: captcha',
     )

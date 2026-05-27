@@ -42,23 +42,46 @@ export const PHONE_OPERATION_RULES = [
   ].join(' '),
 ]
 
-const UNRESTRICTED_PHONE_OPERATION_RULES = [
-  ...PHONE_OPERATION_RULES.slice(0, 7),
+const MEMORY_ENABLED_PHONE_OPERATION_RULES = [
   [
+    'When temporarily opening SMS, Messages, Mail, Browser, or an authenticator app',
+    'to retrieve a verification code, preserve the original task, record the code',
+    'with note/remember, return to the previous task app, and continue there.',
+  ].join(' '),
+  [
+    'Use note/remember to store short durable facts needed later, such as',
+    'verification codes, selected accounts, original app names, or return instructions.',
+  ].join(' '),
+]
+
+const MEMORY_DISABLED_PHONE_OPERATION_RULES = [
+  [
+    'Memory is disabled.',
+    'Do not use note/remember for durable facts, and do not assume observations will be saved for later tasks.',
+  ].join(' '),
+  [
+    'When temporarily opening SMS, Messages, Mail, Browser, or an authenticator app',
+    'to retrieve a verification code, preserve the original task, return to the previous task app,',
+    'and continue there without storing a durable memory.',
+  ].join(' '),
+]
+
+const UNRESTRICTED_SENSITIVE_OPERATION_RULE = [
     'For sensitive operations involving payment, orders, privacy, deletion, permissions,',
     'passwords, login, captcha, verification codes, or account changes,',
     'continue autonomously using the available executable actions.',
-  ].join(' '),
-  PHONE_OPERATION_RULES.at(-1) ?? '',
-]
+].join(' ')
 
 export function buildSystemPrompt({
   actionProtocol = 'webdroid_json',
   unrestrictedMode = false,
+  memoryEnabled = false,
 }: {
   actionProtocol?: ActionProtocol
   unrestrictedMode?: boolean
+  memoryEnabled?: boolean
 } = {}) {
+  const operationRules = buildPhoneOperationRules(memoryEnabled)
   const behaviorRules = unrestrictedMode
     ? [
         [
@@ -71,11 +94,13 @@ export function buildSystemPrompt({
           'permissions, passwords, login, captcha, verification codes, or account changes,',
           'continue autonomously using the available actions.',
         ].join(' '),
-        ...UNRESTRICTED_PHONE_OPERATION_RULES,
+        ...operationRules.slice(0, -3),
+        UNRESTRICTED_SENSITIVE_OPERATION_RULE,
+        operationRules.at(-1) ?? '',
       ]
     : [
         'Do not interact with payments, passwords, or destructive actions without explicit confirmation metadata.',
-        ...PHONE_OPERATION_RULES,
+        ...operationRules,
       ]
 
   const protocolInstructions = buildProtocolInstructions(actionProtocol)
@@ -83,6 +108,7 @@ export function buildSystemPrompt({
   return [
     'You are a phone-control agent for an Android device.',
     'Inspect the screenshot and choose exactly one next action.',
+    'A sequence or repeat action still counts as one next action object.',
     ...protocolInstructions,
     [
       'Use input_text with clear:true when replacing text in a search, address,',
@@ -95,8 +121,21 @@ export function buildSystemPrompt({
       'use those labels as anchors, not grid-cell numbers.',
     ].join(' '),
     'Do not invent shell commands.',
+    'If <available_action_tools> is present in context, treat it as the executable tool contract and use only listed action names.',
     ...behaviorRules,
   ].join('\n')
+}
+
+function buildPhoneOperationRules(memoryEnabled: boolean) {
+  const beforeSensitiveRules = PHONE_OPERATION_RULES.slice(0, 7)
+  const sensitiveAndFinalRules = PHONE_OPERATION_RULES.slice(7)
+  return [
+    ...beforeSensitiveRules,
+    ...(memoryEnabled
+      ? MEMORY_ENABLED_PHONE_OPERATION_RULES
+      : MEMORY_DISABLED_PHONE_OPERATION_RULES),
+    ...sensitiveAndFinalRules,
+  ]
 }
 
 function buildProtocolInstructions(actionProtocol: ActionProtocol) {
@@ -109,6 +148,9 @@ function buildProtocolInstructions(actionProtocol: ActionProtocol) {
       'do(action="Tap", element=[x,y], message="required for sensitive taps")',
       'do(action="Swipe", start=[x1,y1], end=[x2,y2])',
       'do(action="Type", text="Unicode text to type")',
+      'do(action="Open URL", url="https://example.com or app://deep-link")',
+      'do(action="Set Clipboard", text="text to paste later")',
+      'do(action="Paste")',
       'do(action="Back")',
       'do(action="Home")',
       'do(action="Long Press", element=[x,y])',
@@ -127,8 +169,10 @@ function buildProtocolInstructions(actionProtocol: ActionProtocol) {
     return [
       'Return exactly one mobilerun XML tool call block and no markdown:',
       '<function_calls><invoke name="click_at"><parameter name="x">100</parameter><parameter name="y">200</parameter></invoke></function_calls>',
+      'A block may include multiple <invoke> items; they execute sequentially in order.',
       'Supported mobilerun-style tools:',
-      'open_app(text), click_at(x,y), click_area(x1,y1,x2,y2), long_press_at(x,y), swipe(coordinate,coordinate2,duration), type_text(text,clear), system_button(button), wait(duration), remember(information), type_secret(secret_id,clear), custom_tool(tool,input), complete(success,message).',
+      'open_app(text), open_url(url), click_at(x,y), click_area(x1,y1,x2,y2), long_press_at(x,y), swipe(coordinate,coordinate2,duration), type_text(text,clear), set_clipboard(text), paste(), system_button(button), wait(duration), remember(information), type_secret(secret_id,clear), custom_tool(tool,input), complete(success,message).',
+      'Use multiple invokes only for short, visible, stable action chains. Prefer a later observation when an action changes the screen.',
       'Use screenshot pixel coordinates for click_at, click_area, long_press_at, and swipe coordinates.',
     ]
   }
@@ -147,6 +191,9 @@ function buildProtocolInstructions(actionProtocol: ActionProtocol) {
     ].join(''),
     '{"action":"input_text","text":"Unicode text to type","clear":boolean,"reason":"short reason"}',
     '{"action":"type_secret","secretId":"local-secret-id","clear":boolean,"reason":"short reason"}',
+    '{"action":"open_url","url":"https://example.com or app://deep-link","reason":"short reason"}',
+    '{"action":"set_clipboard","text":"Text to paste later","reason":"short reason"}',
+    '{"action":"paste","reason":"short reason"}',
     '{"action":"custom_tool","tool":"tool_name","input":{"key":"value"},"reason":"short reason"}',
     '{"action":"key","key":"BACK|HOME|ENTER|POWER|APP_SWITCH|MENU","reason":"short reason"}',
     '{"action":"back","reason":"short reason"}',
@@ -154,9 +201,12 @@ function buildProtocolInstructions(actionProtocol: ActionProtocol) {
     '{"action":"long_press","x":number,"y":number,"durationMs":number,"reason":"short reason"}',
     '{"action":"double_tap","x":number,"y":number,"reason":"short reason"}',
     '{"action":"wait","duration":number,"reason":"short reason"}',
+    '{"action":"sequence","actions":[{"action":"tap","x":number,"y":number},{"action":"input_text","text":"value"}],"reason":"short reason"}',
+    '{"action":"repeat","count":number,"actionToRepeat":{"action":"swipe","fromX":number,"fromY":number,"toX":number,"toY":number},"delayMs":number,"reason":"short reason"}',
     '{"action":"take_over","message":"what the human must do"}',
     '{"action":"note","message":"short observation"}',
     '{"action":"done","summary":"what was completed"}',
+    'Use sequence or repeat only for short, visible, stable action chains. sequence is capped at 8 child actions and repeat count at 10. Child actions cannot be done, take_over, sequence, or repeat.',
     [
       'Mobilerun-compatible aliases are accepted when needed:',
       'click_at, click_area, long_press_at, type_text, system_button, open_app, remember, complete,',

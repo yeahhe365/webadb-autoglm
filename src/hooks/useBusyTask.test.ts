@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useBusyTask } from './useBusyTask'
 
 describe('useBusyTask', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('tracks the active task while an async action is running', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1234)
     let resolveAction: () => void = () => {}
     const action = vi.fn(
       () =>
@@ -20,7 +25,11 @@ describe('useBusyTask', () => {
       runPromise = result.current.runTask('capture-screen', 'Capture screen', action)
     })
 
-    expect(result.current.busyTask).toEqual({ id: 'capture-screen' })
+    expect(result.current.busyTask).toEqual({
+      id: 'capture-screen',
+      label: 'Capture screen',
+      startedAt: 1234,
+    })
 
     await act(async () => {
       resolveAction()

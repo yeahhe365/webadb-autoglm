@@ -1,67 +1,35 @@
+import type { ReactNode } from 'react'
 import type { AppCopy } from '../lib/appCopy'
 
 export type DeviceOptionsSectionProps = {
   actionSettleMs: number
-  confirmSensitiveActions: boolean
+  className?: string
   copy: AppCopy
   doubleTapIntervalMs: number
   keyboardStepMs: number
-  preferAdbKeyboard: boolean
-  unrestrictedMode: boolean
   onActionSettleMsChange: (value: number) => void
-  onConfirmSensitiveActionsChange: (value: boolean) => void
   onDoubleTapIntervalMsChange: (value: number) => void
   onKeyboardStepMsChange: (value: number) => void
-  onPreferAdbKeyboardChange: (value: boolean) => void
-  onUnrestrictedModeChange: (value: boolean) => void
   sectionId?: string
+  summary?: ReactNode
 }
 
 export function DeviceOptionsSection({
   actionSettleMs,
-  confirmSensitiveActions,
+  className = 'compact-section',
   copy,
   doubleTapIntervalMs,
   keyboardStepMs,
-  preferAdbKeyboard,
-  unrestrictedMode,
   onActionSettleMsChange,
-  onConfirmSensitiveActionsChange,
   onDoubleTapIntervalMsChange,
   onKeyboardStepMsChange,
-  onPreferAdbKeyboardChange,
-  onUnrestrictedModeChange,
   sectionId,
+  summary,
 }: DeviceOptionsSectionProps) {
   return (
-    <details className="compact-section" id={sectionId}>
-      <summary>{copy.deviceOptions}</summary>
+    <details className={className} id={sectionId}>
+      <summary>{summary ?? copy.deviceOptions}</summary>
       <div className="device-options-panel">
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={preferAdbKeyboard}
-            onChange={(event) => onPreferAdbKeyboardChange(event.target.checked)}
-          />
-          <span>{copy.useAdbKeyboard}</span>
-        </label>
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={confirmSensitiveActions}
-            disabled={unrestrictedMode}
-            onChange={(event) => onConfirmSensitiveActionsChange(event.target.checked)}
-          />
-          <span>{copy.confirmSensitiveActions}</span>
-        </label>
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={unrestrictedMode}
-            onChange={(event) => onUnrestrictedModeChange(event.target.checked)}
-          />
-          <span>{copy.unrestrictedMode}</span>
-        </label>
         <div className="timing-grid">
           <label>
             {copy.actionSettle}

@@ -139,6 +139,7 @@ npm run preview
 - `Base URL`：OpenAI 兼容接口地址，默认 `https://api.openai.com/v1`。
 - `API Key`：模型接口密钥。
 - `Model`：模型名称，默认 `gpt-5.5`。
+- `Thinking depth`：GPT-5.5 等推理模型的 `reasoning_effort`，可使用服务默认值，或选择 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`。
 - `Action protocol`：模型动作协议，可选 `webdroid_json`、`open_autoglm_function`、`mobilerun_xml`。
 - `Max steps`：自动执行的最大步数，默认 `50`。
 - `Confirm sensitive actions`：敏感点击是否需要人工确认，默认开启。
@@ -205,6 +206,9 @@ canonical JSON 推荐使用的标准动作：
 | `swipe` | 从一个坐标滑动到另一个坐标 |
 | `input_text` | 输入文本；`clear:true` 会先清空当前焦点文本框 |
 | `type_secret` | 输入本地 Secret；模型只传 `secretId`，不会看到真实值 |
+| `open_url` | 使用 Android `ACTION_VIEW` 打开网页 URL 或 App deep link |
+| `set_clipboard` | 设置 WebDroid 剪贴板文本，并尽力同步到设备剪贴板 |
+| `paste` | 将 WebDroid 剪贴板文本粘贴/输入到当前焦点 |
 | `custom_tool` | 调用本地配置的 Custom Tool |
 | `key` | 发送 Android 按键，如 `BACK`、`HOME`、`ENTER` |
 | `back` | 返回 |
@@ -232,6 +236,10 @@ canonical JSON 推荐使用的标准动作：
 
 ```json
 { "action": "type_secret", "secretId": "gmail_password", "clear": true, "reason": "输入已配置的本地密码" }
+```
+
+```json
+{ "action": "open_url", "url": "https://example.com/search?q=webdroid", "reason": "直接打开目标网页" }
 ```
 
 遗留兼容层仍能接收 `interact` 和 `call_api`，但它们不是推荐给模型使用的真实执行动作：`interact` 会转成 `take_over`，`call_api` 会转成带有“不支持二次 API 调用”说明的 `take_over`。
@@ -287,10 +295,13 @@ Open-AutoGLM 风格坐标使用 `0-1000` 的相对坐标空间；canonical JSON 
 
 - 启动应用：优先匹配设备已安装应用列表，也支持内置常见 App 名称映射或直接传 Android 包名。
 - 点击/滑动：执行前会校验坐标是否在屏幕范围内。
+- 界面结构：每步会尽力通过 `uiautomator dump --compressed` 读取当前控件树，把可见文本、描述、资源 ID、可点击状态和 bounds 注入模型上下文。
+- 打开 URL：使用 Android `am start -a android.intent.action.VIEW -d <url>`，支持网页和设备上已注册的 deep link。
 - 长按：使用 Android `input swipe x y x y duration` 命令模拟。
 - 双击：连续发送两次 `tap`，中间带可配置延迟。
 - 文本输入：简单 ASCII 文本使用 Android `input text`。
 - 清空后输入、中文和复杂字符：使用 ADB Keyboard 或 AutoGLM Keyboard 广播模式输入。
+- 剪贴板：`set_clipboard` 会保存一份本地 WebDroid 剪贴板并尝试调用 `cmd clipboard set`；`paste` 优先用本地剪贴板通过当前输入通道写入焦点框。
 - ADB Keyboard 模式要求设备上已安装并启用 `com.android.adbkeyboard/.AdbIME`；设备面板提供安装和启用入口。
 - 每个设备动作执行后会按 `Action settle` 配置等待，避免动画或页面加载期间过早进入下一步。
 

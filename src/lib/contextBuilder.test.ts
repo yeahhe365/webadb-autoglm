@@ -67,7 +67,7 @@ describe('context builder', () => {
     expect(context.text).toContain('Step 1')
   })
 
-  it('includes the full installed app list in prompt context', () => {
+  it('caps the installed app prompt list while keeping the requested app', () => {
     const installedApps = Array.from({ length: 45 }, (_, index) => ({
       packageName: `com.example.app${index}`,
     }))
@@ -80,6 +80,8 @@ describe('context builder', () => {
 
     expect(context.text).toContain('app44: com.example.app44')
     expect(context.text).toContain('app0: com.example.app0')
+    expect(context.text).toContain('... truncated 5 more apps')
+    expect(context.text).not.toContain('app39: com.example.app39')
   })
 
   it('uses only recent turns for prompt history', () => {
@@ -142,7 +144,9 @@ describe('context builder', () => {
     expect(thread.contextCompactedThroughStep).toBe(4)
     expect(thread.turns).toHaveLength(6)
     expect(thread.turns[0].promptContext).toBe('')
+    expect(thread.turns[0].modelOutput).toBe('')
     expect(thread.turns[3].promptContext).toBe('')
+    expect(thread.turns[3].modelOutput).toBe('')
     expect(thread.turns[4].promptContext).toBe('prompt')
     expect(thread.events.at(-1)).toEqual(
       expect.objectContaining({
@@ -198,6 +202,108 @@ describe('context builder', () => {
     expect(context.text).toContain('- Then show paired devices')
   })
 
+  it('keeps durable memory out of prompt context by default', () => {
+    const thread = createAgentThread('Open Gmail')
+    thread.memory = ['Use the work Gmail account.']
+
+    const context = buildAgentPromptContext({
+      thread,
+      task: 'Open Gmail',
+      memoryItems: ['Verification code is 123456.'],
+      screen: { width: 1080, height: 2400 },
+      currentApp: 'Gmail',
+      deviceState: { app: 'Gmail' },
+    })
+
+    expect(context.text).not.toContain('Durable memory:')
+    expect(context.text).not.toContain('Use the work Gmail account.')
+    expect(context.text).not.toContain('Verification code is 123456.')
+    expect(context.text).toContain('without storing durable memory')
+    expect(context.text).not.toContain('store the code with note/remember')
+  })
+
+  it('includes local and thread memory only when memory is enabled', () => {
+    const thread = createAgentThread('Open Gmail')
+    thread.memory = ['Use the work Gmail account.']
+
+    const context = buildAgentPromptContext({
+      thread,
+      task: 'Open Gmail',
+      memoryEnabled: true,
+      memoryItems: ['Verification code is 123456.'],
+      screen: { width: 1080, height: 2400 },
+      currentApp: 'Gmail',
+      deviceState: { app: 'Gmail' },
+    })
+
+    expect(context.text).toContain('Durable memory:')
+    expect(context.text).toContain('- Verification code is 123456.')
+    expect(context.text).toContain('- Use the work Gmail account.')
+    expect(context.text).toContain('store the code with note/remember')
+  })
+
+  it('includes runtime action tool signatures when provided', () => {
+    const context = buildAgentPromptContext({
+      task: 'Open Settings',
+      actionTools: {
+        tap: {
+          description: 'Tap a screen coordinate.',
+          parameters: {
+            x: { type: 'number', required: true },
+            y: { type: 'number', required: true },
+            message: { type: 'string', required: false },
+          },
+        },
+        back: {
+          description: 'Press Android Back.',
+          parameters: {},
+        },
+      },
+      screen: { width: 1080, height: 2400 },
+      currentApp: 'Settings',
+      deviceState: { app: 'Settings' },
+    })
+
+    expect(context.text).toContain('<available_action_tools>')
+    expect(context.text).toContain('Choose only one listed action tool')
+    expect(context.text).toContain('tap(x:number required, y:number required, message:string optional)')
+    expect(context.text).toContain('back(): Press Android Back.')
+  })
+
+  it('truncates prompt-supplied context fields before sending them to the model', () => {
+    const context = buildAgentPromptContext({
+      task: `Open Settings ${'t'.repeat(3000)}`,
+      latestUserMessage: `Latest ${'u'.repeat(3000)}`,
+      pendingUserMessages: [`Pending ${'p'.repeat(3000)}`],
+      appCard: `# Huge app card\n${'a'.repeat(7000)}`,
+      customTools: [
+        {
+          name: 'lookup',
+          description: `Tool description ${'d'.repeat(1200)}`,
+        },
+      ],
+      actionTools: {
+        tap: {
+          description: `Tap ${'x'.repeat(1200)}`,
+          parameters: {
+            x: { type: 'number', required: true },
+          },
+        },
+      },
+      screen: { width: 1080, height: 2400 },
+      currentApp: 'Settings',
+      deviceState: { app: 'Settings' },
+    })
+
+    expect(context.text).toContain('[truncated]')
+    expect(context.text).not.toContain('t'.repeat(2600))
+    expect(context.text).not.toContain('u'.repeat(2600))
+    expect(context.text).not.toContain('p'.repeat(1600))
+    expect(context.text).not.toContain('a'.repeat(5600))
+    expect(context.text).not.toContain('d'.repeat(800))
+    expect(context.text).not.toContain('x'.repeat(800))
+  })
+
   it('surfaces recent failed action feedback for recovery planning', () => {
     const thread = createAgentThread('Open app', { id: 'thread-errors', now: 1000 })
     const turn = startThreadTurn(thread, {
@@ -234,6 +340,74 @@ describe('context builder', () => {
     expect(context.text).toContain('action=tap (100, 200)')
     expect(context.text).toContain('feedback=tap failed: stale coordinates')
     expect(context.text).toContain('do not repeat the exact same failed action')
+  })
+
+  it('adds a compact shared state block with recent tool results', () => {
+    const thread = createAgentThread('Open Settings', { id: 'thread-shared-state', now: 1000 })
+    const firstTurn = startThreadTurn(thread, {
+      id: 'turn-ok',
+      index: 1,
+      task: 'Open Settings',
+      promptContext: 'prompt',
+      modelOutput: '{"action":"tap","x":100,"y":200}',
+      action,
+      executionAction: action,
+      preview: 'tap (100, 200)',
+      deviceSnapshot: {
+        currentApp: 'Settings',
+        deviceState: { app: 'Settings' },
+      },
+      timing,
+      now: 1100,
+    })
+    recordThreadTurnExecution(thread, firstTurn.id, {
+      executionResult: 'input tap 100 200',
+      success: true,
+      now: 1200,
+    })
+    const secondTurn = startThreadTurn(thread, {
+      id: 'turn-failed',
+      index: 2,
+      task: 'Open Settings',
+      promptContext: 'prompt',
+      modelOutput: '{"action":"tap","x":300,"y":400}',
+      action: { action: 'tap', x: 300, y: 400 },
+      executionAction: { action: 'tap', x: 300, y: 400 },
+      preview: 'tap (300, 400)',
+      deviceSnapshot: {
+        currentApp: 'Settings',
+        deviceState: { app: 'Settings' },
+      },
+      timing,
+      now: 1300,
+    })
+    recordThreadTurnExecution(thread, secondTurn.id, {
+      executionResult: 'tap failed',
+      success: false,
+      now: 1400,
+    })
+    thread.pendingUserMessages.push({
+      id: 'pending-1',
+      message: 'Use search instead',
+      queuedAtStep: 2,
+    })
+
+    const context = buildAgentPromptContext({
+      thread,
+      task: 'Open Settings',
+      pendingUserMessages: ['Use search instead'],
+      screen: { width: 1080, height: 2400 },
+      currentApp: 'Settings',
+      deviceState: { app: 'Settings' },
+    })
+
+    expect(context.text).toContain('<shared_state>')
+    expect(context.text).toContain('Completed turns: 2')
+    expect(context.text).toContain('Failed turns: 1')
+    expect(context.text).toContain('Pending user messages: 1')
+    expect(context.text).toContain('Recent outcomes: ok -> failed')
+    expect(context.text).toContain('- #1 ok: tap (100, 200) | result=input tap 100 200')
+    expect(context.text).toContain('- #2 failed: tap (300, 400) | result=tap failed')
   })
 
   it('does not count planned turns against the recent turn compaction window', () => {

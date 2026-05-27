@@ -43,6 +43,23 @@ export type TypeSecretAction = {
   reason?: string
 }
 
+export type OpenUrlAction = {
+  action: 'open_url'
+  url: string
+  reason?: string
+}
+
+export type SetClipboardAction = {
+  action: 'set_clipboard'
+  text: string
+  reason?: string
+}
+
+export type PasteAction = {
+  action: 'paste'
+  reason?: string
+}
+
 export type KeyAction = {
   action: 'key'
   key:
@@ -121,6 +138,38 @@ export type CustomToolAction = {
   reason?: string
 }
 
+export type ExecutableAtomicAction =
+  | TapAction
+  | SwipeAction
+  | LaunchAction
+  | InputTextAction
+  | TypeSecretAction
+  | OpenUrlAction
+  | SetClipboardAction
+  | PasteAction
+  | KeyAction
+  | BackAction
+  | HomeAction
+  | LongPressAction
+  | DoubleTapAction
+  | WaitAction
+  | NoteAction
+  | CustomToolAction
+
+export type SequenceAction = {
+  action: 'sequence'
+  actions: ExecutableAtomicAction[]
+  reason?: string
+}
+
+export type RepeatAction = {
+  action: 'repeat'
+  count: number
+  actionToRepeat: ExecutableAtomicAction
+  delayMs?: number
+  reason?: string
+}
+
 export type DoneAction = {
   action: 'done'
   summary?: string
@@ -133,6 +182,9 @@ export type AgentAction =
   | LaunchAction
   | InputTextAction
   | TypeSecretAction
+  | OpenUrlAction
+  | SetClipboardAction
+  | PasteAction
   | KeyAction
   | BackAction
   | HomeAction
@@ -144,6 +196,8 @@ export type AgentAction =
   | InteractAction
   | CallApiAction
   | CustomToolAction
+  | SequenceAction
+  | RepeatAction
   | DoneAction
 
 export class ActionValidationError extends Error {

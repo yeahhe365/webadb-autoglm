@@ -4,6 +4,10 @@ import type { ScreenSize } from './actionTypes'
 import type { AgentStep } from './agent'
 import { formatDeviceState } from './deviceState'
 import { modelScreenshotView } from './screenshot'
+import { truncateOptionalRetainedText, truncateRetainedText } from './textRetention'
+
+export const MAX_RUN_LOG_DETAIL_CHARS = 6000
+export const MAX_RUN_LOG_TIMELINE_FIELD_CHARS = 4000
 
 export type LogScreenshot = {
   dataUrl: string
@@ -21,6 +25,7 @@ export type LogEntry = {
     step?: number
     currentApp?: string
     packageName?: string
+    toolName?: string
     modelOutput?: string
     actionPreview?: string
     executionActionPreview?: string
@@ -36,7 +41,7 @@ export function createRunLogEntry(
   id = date.getTime() + Math.random(),
 ): LogEntry {
   return {
-    ...entry,
+    ...compactRunLogEntryInput(entry),
     id,
     time: new Intl.DateTimeFormat(undefined, {
       hour: '2-digit',
@@ -60,14 +65,20 @@ export function formatAgentStepDetail(step: AgentStep) {
     `app ${step.timing.currentAppMs}ms`,
     `model ${step.timing.modelMs}ms`,
     `parse ${step.timing.parseMs}ms`,
+    step.timing.executionMs === undefined ? null : `execution ${step.timing.executionMs}ms`,
     `total ${step.timing.totalMs}ms`,
-  ].join(', ')
+  ]
+    .filter((part): part is string => part !== null)
+    .join(', ')
 
   return [
     `Current app: ${step.currentApp}`,
+    step.toolName ? `Tool: ${step.toolName}` : null,
     `Timing: ${timingDetail}`,
-    step.modelOutput,
-  ].join('\n\n')
+    truncateRetainedText(step.modelOutput, MAX_RUN_LOG_TIMELINE_FIELD_CHARS),
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n\n')
 }
 
 export function buildAgentStepTimeline(
@@ -78,10 +89,14 @@ export function buildAgentStepTimeline(
     step: step.index,
     currentApp: step.currentApp,
     packageName: step.deviceState.packageName,
-    modelOutput: step.modelOutput,
+    toolName: step.toolName,
+    modelOutput: truncateRetainedText(step.modelOutput, MAX_RUN_LOG_TIMELINE_FIELD_CHARS),
     actionPreview: buildActionPreview(step.action),
     executionActionPreview: buildActionPreview(step.executionAction),
-    executionResult,
+    executionResult: truncateOptionalRetainedText(
+      executionResult,
+      MAX_RUN_LOG_TIMELINE_FIELD_CHARS,
+    ),
   }
 }
 
@@ -96,5 +111,35 @@ export function toLogScreenshot(
   return {
     dataUrl: view.dataUrl,
     screen: view.screen,
+  }
+}
+
+function compactRunLogEntryInput(entry: LogEntryInput): LogEntryInput {
+  return {
+    ...entry,
+    detail: truncateOptionalRetainedText(entry.detail, MAX_RUN_LOG_DETAIL_CHARS),
+    ...(entry.timeline
+      ? {
+          timeline: {
+            ...entry.timeline,
+            modelOutput: truncateOptionalRetainedText(
+              entry.timeline.modelOutput,
+              MAX_RUN_LOG_TIMELINE_FIELD_CHARS,
+            ),
+            actionPreview: truncateOptionalRetainedText(
+              entry.timeline.actionPreview,
+              MAX_RUN_LOG_TIMELINE_FIELD_CHARS,
+            ),
+            executionActionPreview: truncateOptionalRetainedText(
+              entry.timeline.executionActionPreview,
+              MAX_RUN_LOG_TIMELINE_FIELD_CHARS,
+            ),
+            executionResult: truncateOptionalRetainedText(
+              entry.timeline.executionResult,
+              MAX_RUN_LOG_TIMELINE_FIELD_CHARS,
+            ),
+          },
+        }
+      : {}),
   }
 }

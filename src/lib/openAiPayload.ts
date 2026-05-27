@@ -10,8 +10,14 @@ import type {
   UserContent,
 } from './openAiTypes'
 import { formatPromptHistoryItem } from './promptContextFormatting'
+import { truncateRetainedText } from './textRetention'
 
 export const MAX_PROMPT_CONVERSATION_MESSAGES = 16
+const MAX_PROMPT_OBSERVATION_MESSAGES = 6
+const MAX_PROMPT_ASSISTANT_ACTION_MESSAGES = 4
+const MAX_PROMPT_USER_MESSAGE_CHARS = 6000
+const MAX_PROMPT_ASSISTANT_MESSAGE_CHARS = 6000
+const MAX_PROMPT_OBSERVATION_CHARS = 4000
 
 export function buildChatCompletionPayload({
   model,
@@ -22,14 +28,19 @@ export function buildChatCompletionPayload({
   deviceScreen,
   currentApp,
   deviceState,
+  screenTree,
   history = [],
   appCard,
   actionProtocol = 'webdroid_json',
   customTools,
   installedApps,
   promptContext,
+  reasoningEffort,
   secrets,
   unrestrictedMode,
+  memoryEnabled = false,
+  memoryItems,
+  actionTools,
   stream,
 }: Pick<
   CompletionRequest,
@@ -41,20 +52,25 @@ export function buildChatCompletionPayload({
   | 'deviceScreen'
   | 'currentApp'
   | 'deviceState'
+  | 'screenTree'
   | 'history'
   | 'appCard'
   | 'actionProtocol'
   | 'customTools'
   | 'installedApps'
   | 'promptContext'
+  | 'reasoningEffort'
   | 'secrets'
   | 'unrestrictedMode'
+  | 'memoryEnabled'
+  | 'memoryItems'
+  | 'actionTools'
   | 'stream'
 >): ChatCompletionPayload {
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: buildSystemPrompt({ actionProtocol, unrestrictedMode }),
+      content: buildSystemPrompt({ actionProtocol, unrestrictedMode, memoryEnabled }),
     },
   ]
 
@@ -67,9 +83,13 @@ export function buildChatCompletionPayload({
       deviceScreen,
       currentApp,
       deviceState,
+      screenTree,
       appCard,
       customTools,
       installedApps,
+      memoryEnabled,
+      memoryItems,
+      actionTools,
       secrets,
       latestUserMessage: latestUserMessage(conversation),
     }).text
@@ -109,6 +129,7 @@ export function buildChatCompletionPayload({
     ...(actionProtocol === 'webdroid_json'
       ? { response_format: { type: 'json_object' as const } }
       : {}),
+    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     ...(stream ? { stream: true } : {}),
     messages,
   }
@@ -119,16 +140,51 @@ export function buildChatCompletionPayload({
 function selectConversationMessagesForPrompt(conversation?: readonly AgentConversationMessage[]) {
   const messages = conversation?.filter((message) => message.content.trim()) ?? []
   if (messages.length <= MAX_PROMPT_CONVERSATION_MESSAGES) {
-    return messages
+    return capNoisyPromptMessages(messages)
   }
 
   const firstUser = messages.find((message) => message.role === 'user')
   const recentMessages = messages.slice(-MAX_PROMPT_CONVERSATION_MESSAGES)
   if (!firstUser || recentMessages.some((message) => message.id === firstUser.id)) {
-    return recentMessages
+    return capNoisyPromptMessages(recentMessages)
   }
 
-  return [firstUser, ...recentMessages]
+  return capNoisyPromptMessages([firstUser, ...recentMessages])
+}
+
+function capNoisyPromptMessages(messages: readonly AgentConversationMessage[]) {
+  let observationsKept = 0
+  let assistantActionMessagesKept = 0
+  const selected: AgentConversationMessage[] = []
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role === 'observation') {
+      observationsKept += 1
+      if (observationsKept > MAX_PROMPT_OBSERVATION_MESSAGES) {
+        continue
+      }
+    }
+    if (message.role === 'assistant' && looksLikeActionMessage(message.content)) {
+      assistantActionMessagesKept += 1
+      if (assistantActionMessagesKept > MAX_PROMPT_ASSISTANT_ACTION_MESSAGES) {
+        continue
+      }
+    }
+    selected.push(message)
+  }
+
+  return selected.reverse()
+}
+
+function looksLikeActionMessage(content: string) {
+  const text = content.trim()
+  return (
+    text.startsWith('{') ||
+    text.startsWith('<function_calls>') ||
+    text.startsWith('<think>') ||
+    text.startsWith('<answer>')
+  )
 }
 
 export function buildFinalResponsePayload({
@@ -139,6 +195,7 @@ export function buildFinalResponsePayload({
   currentApp,
   deviceState,
   progressSummary,
+  reasoningEffort,
   stream,
 }: Pick<
   FinalResponseRequest,
@@ -149,6 +206,7 @@ export function buildFinalResponsePayload({
   | 'currentApp'
   | 'deviceState'
   | 'progressSummary'
+  | 'reasoningEffort'
   | 'stream'
 >): ChatCompletionPayload {
   const messages: ChatMessage[] = [
@@ -177,6 +235,7 @@ export function buildFinalResponsePayload({
     model,
     temperature: 0.2,
     max_tokens: 700,
+    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     ...(stream ? { stream: true } : {}),
     messages,
   }
@@ -239,20 +298,23 @@ function toChatMessage(message: AgentConversationMessage): ChatMessage {
   if (message.role === 'assistant') {
     return {
       role: 'assistant',
-      content: message.content,
+      content: truncateRetainedText(message.content, MAX_PROMPT_ASSISTANT_MESSAGE_CHARS),
     }
   }
 
   if (message.role === 'observation') {
     return {
       role: 'user',
-      content: `<observation>\n${message.content}\n</observation>`,
+      content: `<observation>\n${truncateRetainedText(
+        message.content,
+        MAX_PROMPT_OBSERVATION_CHARS,
+      )}\n</observation>`,
     }
   }
 
   return {
     role: 'user',
-    content: message.content,
+    content: truncateRetainedText(message.content, MAX_PROMPT_USER_MESSAGE_CHARS),
   }
 }
 

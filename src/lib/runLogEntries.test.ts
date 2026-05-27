@@ -5,6 +5,8 @@ import {
   createRunLogEntry,
   formatAgentStepDetail,
   formatScreenCaptureDetail,
+  MAX_RUN_LOG_DETAIL_CHARS,
+  MAX_RUN_LOG_TIMELINE_FIELD_CHARS,
   toLogScreenshot,
 } from './runLogEntries'
 
@@ -95,11 +97,42 @@ describe('run log entries', () => {
     })
   })
 
+  it('includes dispatched tool names in step detail and timeline metadata', () => {
+    const stepWithTool = { ...step, toolName: 'tap' }
+
+    expect(formatAgentStepDetail(stepWithTool)).toContain('Tool: tap')
+    expect(buildAgentStepTimeline(stepWithTool, 'ok')).toEqual(
+      expect.objectContaining({
+        toolName: 'tap',
+      }),
+    )
+  })
+
   it('keeps log screenshots in model-view coordinates', () => {
     expect(toLogScreenshot(screenshot)).toEqual({
       dataUrl: 'data:image/png;base64,model',
       screen: { width: 540, height: 1200 },
     })
     expect(toLogScreenshot(null)).toBeUndefined()
+  })
+
+  it('truncates large log details and timeline fields before storing them', () => {
+    const detail = 'd'.repeat(MAX_RUN_LOG_DETAIL_CHARS + 100)
+    const modelOutput = 'm'.repeat(MAX_RUN_LOG_TIMELINE_FIELD_CHARS + 100)
+
+    const entry = createRunLogEntry({
+      detail,
+      title: 'Large event',
+      tone: 'info',
+      timeline: {
+        modelOutput,
+        executionResult: modelOutput,
+      },
+    })
+
+    expect(entry.detail?.length).toBe(MAX_RUN_LOG_DETAIL_CHARS)
+    expect(entry.detail).toContain('[truncated]')
+    expect(entry.timeline?.modelOutput?.length).toBe(MAX_RUN_LOG_TIMELINE_FIELD_CHARS)
+    expect(entry.timeline?.executionResult?.length).toBe(MAX_RUN_LOG_TIMELINE_FIELD_CHARS)
   })
 })

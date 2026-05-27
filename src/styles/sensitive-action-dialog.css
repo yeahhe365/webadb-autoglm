@@ -1,0 +1,126 @@
+.sensitive-action-dialog-page {
+  align-items: center;
+  background: color-mix(in srgb, var(--overlay) 92%, transparent);
+  backdrop-filter: blur(10px);
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  left: 0;
+  overflow: hidden;
+  padding: 24px;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 50;
+}
+
+.sensitive-action-dialog-panel {
+  --sensitive-action-dialog-padding: 20px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-bg-elevated) 42%, transparent), transparent),
+    var(--panel-bg);
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 8px;
+  box-shadow:
+    0 32px 90px color-mix(in srgb, var(--shadow-strong) 86%, transparent),
+    0 1px 0 color-mix(in srgb, var(--on-primary) 22%, transparent) inset;
+  display: grid;
+  gap: 16px;
+  max-height: min(calc(100vh - 48px), 620px);
+  max-height: min(calc(100dvh - 48px), 620px);
+  max-width: 500px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sensitive-action-dialog-padding);
+  scrollbar-gutter: stable;
+  width: min(100%, 500px);
+}
+
+.sensitive-action-dialog-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+}
+
+.sensitive-action-dialog-header h2 {
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.sensitive-action-dialog-icon {
+  align-items: center;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 8px;
+  color: var(--warn);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.sensitive-action-dialog-message,
+.sensitive-action-dialog-prompt {
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.sensitive-action-dialog-prompt {
+  padding-bottom: 4px;
+}
+
+.sensitive-action-dialog-preview {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-bg) 34%, transparent), transparent),
+    var(--subtle-bg);
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.sensitive-action-dialog-preview span {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sensitive-action-dialog-preview code {
+  color: var(--text);
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.sensitive-action-dialog-actions {
+  background: linear-gradient(180deg, transparent, var(--panel-bg) 18px);
+  bottom: calc(var(--sensitive-action-dialog-padding) * -1);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: -4px 0 calc(var(--sensitive-action-dialog-padding) * -1);
+  padding: 12px 0 var(--sensitive-action-dialog-padding);
+  position: sticky;
+  z-index: 1;
+}
+
+@media (max-width: 520px) {
+  .sensitive-action-dialog-page {
+    align-items: flex-end;
+    padding: 12px;
+  }
+
+  .sensitive-action-dialog-panel {
+    --sensitive-action-dialog-padding: 16px;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .sensitive-action-dialog-actions {
+    grid-template-columns: 1fr;
+  }
+}

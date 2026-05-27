@@ -1,17 +1,15 @@
 .phone-stage {
   align-items: center;
-  background:
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    var(--button-bg);
-  background-size: 28px 28px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
   display: flex;
   justify-content: center;
   min-height: 660px;
+  overflow: hidden;
   padding: 12px;
   position: relative;
+}
+
+.phone-stage-empty {
+  min-height: 430px;
 }
 
 .phone-stage-fullscreen::before {
@@ -29,13 +27,35 @@
   aspect-ratio: 9 / 20;
   background: var(--phone-screen);
   border: 8px solid var(--phone-shell);
-  border-radius: 24px;
-  box-shadow: 0 24px 70px rgba(23, 32, 38, 0.24);
+  border-radius: 28px;
+  box-shadow:
+    0 30px 80px color-mix(in srgb, var(--shadow-strong) 54%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--on-primary) 8%, transparent) inset,
+    0 0 0 1px color-mix(in srgb, var(--phone-shell) 90%, transparent);
   max-height: 72vh;
   max-width: 100%;
   overflow: hidden;
   position: relative;
   width: min(100%, 32.4vh);
+}
+
+.phone-stage-empty .phone-frame {
+  max-height: 460px;
+  width: min(100%, 240px);
+}
+
+.phone-frame::before {
+  background: color-mix(in srgb, var(--on-primary) 11%, transparent);
+  border-radius: 999px;
+  content: "";
+  height: 4px;
+  left: 50%;
+  pointer-events: none;
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  width: 52px;
+  z-index: 10;
 }
 
 .phone-frame.phone-frame-fullscreen {
@@ -49,6 +69,10 @@
   transform: none;
   width: 100vw;
   z-index: 40;
+}
+
+.phone-frame.phone-frame-fullscreen::before {
+  display: none;
 }
 
 .phone-viewport {
@@ -82,16 +106,70 @@
 }
 
 .phone-screen-placeholder {
-  background: var(--phone-screen);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--on-primary) 4%, transparent), transparent 34%),
+    var(--phone-screen);
+  display: grid;
   height: 100%;
+  place-items: center;
+  position: relative;
   width: 100%;
+}
+
+.phone-screen-placeholder::before,
+.phone-screen-placeholder::after {
+  background: color-mix(in srgb, var(--on-primary) 7%, transparent);
+  border-radius: 999px;
+  content: "";
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.phone-screen-placeholder::before {
+  height: 7px;
+  top: 8%;
+  width: 26%;
+}
+
+.phone-screen-placeholder::after {
+  bottom: 5%;
+  height: 5px;
+  width: 34%;
+}
+
+.phone-empty-state {
+  align-items: center;
+  color: color-mix(in srgb, var(--modal-text) 62%, transparent);
+  display: grid;
+  gap: 7px;
+  justify-items: center;
+  max-width: 74%;
+  text-align: center;
+}
+
+.phone-empty-state svg {
+  color: color-mix(in srgb, var(--accent) 84%, var(--modal-text));
+}
+
+.phone-empty-state strong {
+  color: var(--modal-text);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.phone-empty-state span {
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .phone-zoom-controls {
   align-items: center;
-  background: rgba(17, 24, 29, 0.82);
+  background: color-mix(in srgb, var(--phone-screen) 84%, transparent);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(14px);
   color: var(--modal-text);
   display: flex;
   gap: 4px;
@@ -197,7 +275,11 @@
 
 .screenshot-command-draft {
   align-items: center;
-  background: rgba(17, 24, 29, 0.82);
+  background: color-mix(in srgb, var(--phone-screen) 86%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(14px);
   bottom: 12px;
   color: var(--modal-text);
   display: grid;

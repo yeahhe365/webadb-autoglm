@@ -8,6 +8,8 @@ import type { ScreenSize } from './actionTypes'
 import { UNKNOWN_APP_NAME } from './deviceState'
 import { buildScreenshotContext } from './screenshot'
 
+export const DEFAULT_INSTALLED_APPS_PROMPT_LIMIT = 40
+
 export const CANONICAL_COORDINATE_INSTRUCTION = [
   'Coordinates use pixels in the attached screenshot.',
   'Use numeric x/y labels on major grid lines as anchors; do not answer with grid-cell numbers.',
@@ -53,13 +55,22 @@ export function formatPromptHistoryItem(item: AgentHistoryItem) {
 export function formatInstalledAppsForPrompt(
   installedApps?: readonly InstalledApp[],
   query = '',
+  limit = DEFAULT_INSTALLED_APPS_PROMPT_LIMIT,
 ) {
-  const apps = selectInstalledAppsForPrompt(installedApps, query)
+  const apps = selectInstalledAppsForPrompt(installedApps, query, limit)
   if (apps.length === 0) {
     return null
   }
 
   const lines = apps.map((app) => `${getInstalledAppDisplayName(app)}: ${app.packageName}`)
 
-  return [`<installed_apps>`, ...lines, `</installed_apps>`].join('\n')
+  const hiddenCount = Math.max(0, (installedApps?.length ?? 0) - apps.length)
+  return [
+    `<installed_apps>`,
+    ...lines,
+    hiddenCount > 0 ? `... truncated ${hiddenCount} more apps` : null,
+    `</installed_apps>`,
+  ]
+    .filter(Boolean)
+    .join('\n')
 }

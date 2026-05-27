@@ -4,11 +4,13 @@ import {
   addUserMessage,
   createAgentRunner,
   queueUserMessage,
+  recordAgentStepExecutionDuration,
   recordAgentFinalResponse,
   recordAgentStep,
   type AgentSession,
   type AgentStep,
 } from '../lib/agent'
+import type { AgentAction } from '../lib/actionTypes'
 import type { AppCopy } from '../lib/appCopy'
 import type { ActionProtocol } from '../lib/actionProtocol'
 import type { AppCardMap } from '../lib/appCards'
@@ -40,7 +42,7 @@ type UseAgentRunControllerInput = {
   customTools: readonly CustomToolDefinition[]
   device: {
     applyDeviceSnapshot: (snapshot: DeviceSnapshotUpdate) => void
-    confirmSensitiveAction: (message: string) => boolean
+    confirmSensitiveAction: (message: string, action: AgentAction) => boolean | Promise<boolean>
     refreshDisplayedSnapshot: () => Promise<{
       screenshot: DeviceSnapshotUpdate['screenshot']
       deviceState: DeviceSnapshotUpdate['deviceState']
@@ -48,7 +50,10 @@ type UseAgentRunControllerInput = {
   }
   ensureSession: () => AgentSession
   maxSteps: number
+  memoryEnabled: boolean
+  memoryItems: readonly string[]
   modelConfig: ModelConfig
+  onMemoryItem: (information: string) => void
   pendingStep: AgentStep | null
   runTask: RunTask
   setChatInput: (value: string) => void
@@ -76,7 +81,10 @@ export function useAgentRunController({
   device,
   ensureSession,
   maxSteps,
+  memoryEnabled,
+  memoryItems,
   modelConfig,
+  onMemoryItem,
   pendingStep,
   runTask,
   setChatInput,
@@ -97,7 +105,10 @@ export function useAgentRunController({
 
     await runTask('execute-action', copy.executeActionTask, async () => {
       if (pendingStep.action.action === 'done') {
-        recordAgentStep(ensureSession(), pendingStep)
+        recordAgentStep(ensureSession(), pendingStep, undefined, undefined, {
+          memoryEnabled,
+          onMemoryItem,
+        })
         const finalResponse = await recordAgentFinalResponse({
           client,
           modelConfig: { ...modelConfig, stream: streamResponses },
@@ -110,6 +121,7 @@ export function useAgentRunController({
         return
       }
 
+      const executionStartedAt = performance.now()
       const result = await actionToolRegistry.execute(pendingStep.executionAction, {
         device: backend,
         confirmSensitiveAction: device.confirmSensitiveAction,
@@ -123,7 +135,12 @@ export function useAgentRunController({
         customTools,
         secrets,
       })
-      recordAgentStep(ensureSession(), pendingStep, result.summary, result.success)
+      recordAgentStepExecutionDuration(pendingStep, performance.now() - executionStartedAt)
+      pendingStep.toolName = result.toolName
+      recordAgentStep(ensureSession(), pendingStep, result.summary, result.success, {
+        memoryEnabled,
+        onMemoryItem,
+      })
       addLog({
         tone: result.success ? 'ok' : 'error',
         title: result.success
@@ -149,6 +166,8 @@ export function useAgentRunController({
     customTools,
     device,
     ensureSession,
+    memoryEnabled,
+    onMemoryItem,
     modelConfig,
     pendingStep,
     runTask,
@@ -183,9 +202,12 @@ export function useAgentRunController({
           appCards,
           customTools,
           maxSteps,
+          memoryEnabled,
+          memoryItems,
           session,
           secrets,
           signal: abortController.signal,
+          onMemoryItem,
           confirmSensitiveAction: device.confirmSensitiveAction,
           unrestrictedMode,
           onSnapshot: device.applyDeviceSnapshot,
@@ -254,7 +276,10 @@ export function useAgentRunController({
     device,
     ensureSession,
     maxSteps,
+    memoryEnabled,
+    memoryItems,
     modelConfig,
+    onMemoryItem,
     runTask,
     screenBlackoutDuringAutoControl,
     secrets,

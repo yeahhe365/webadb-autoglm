@@ -8,6 +8,9 @@ import {
   buildEnableStayAwakeCommand,
   buildInputCommand,
   buildInputCommandSequence,
+  buildDumpScreenTreeCommand,
+  buildReadScreenTreeCommand,
+  buildRemoveScreenTreeCommand,
   buildReadScreenBrightnessCommand,
   buildReadScreenBrightnessModeCommand,
   buildReadStayAwakeSettingCommand,
@@ -24,6 +27,8 @@ import {
   keyToAndroidKeyCode,
   normalizeScreenSetting,
   normalizeStayAwakeSetting,
+  parseUiAutomatorDumpXml,
+  formatScreenTreeForPrompt,
 } from './deviceCommands'
 import {
   parseCurrentAppFromDumpsys,
@@ -164,6 +169,41 @@ describe('screen blackout commands', () => {
   })
 })
 
+describe('ui automator screen tree utilities', () => {
+  it('builds dump/read/remove commands and parses useful nodes', () => {
+    expect(buildDumpScreenTreeCommand()).toEqual([
+      'uiautomator',
+      'dump',
+      '--compressed',
+      '/sdcard/webdroid-window-dump.xml',
+    ])
+    expect(buildReadScreenTreeCommand()).toEqual(['cat', '/sdcard/webdroid-window-dump.xml'])
+    expect(buildRemoveScreenTreeCommand()).toEqual(['rm', '-f', '/sdcard/webdroid-window-dump.xml'])
+
+    const tree = parseUiAutomatorDumpXml(`
+      <hierarchy>
+        <node index="0" text="" resource-id="" class="android.widget.FrameLayout" bounds="[0,0][1080,2400]" />
+        <node index="1" text="Search" content-desc="Search field" resource-id="com.example:id/search" class="android.widget.EditText" clickable="true" focused="true" enabled="true" bounds="[24,100][1056,180]" />
+      </hierarchy>
+    `)
+
+    expect(tree.nodes[1]).toEqual({
+      index: 1,
+      text: 'Search',
+      contentDescription: 'Search field',
+      resourceId: 'com.example:id/search',
+      className: 'android.widget.EditText',
+      clickable: true,
+      focused: true,
+      enabled: true,
+      bounds: { left: 24, top: 100, right: 1056, bottom: 180 },
+    })
+    expect(tree).not.toHaveProperty('rawXml')
+    expect(formatScreenTreeForPrompt(tree)).toContain('center=(540,140)')
+    expect(formatScreenTreeForPrompt(tree)).toContain('text="Search"')
+  })
+})
+
 describe('buildInputCommandSequence', () => {
   it('builds launch commands from package names and app labels', () => {
     expect(buildInputCommandSequence({ action: 'launch', app: 'Settings' })).toEqual([
@@ -228,6 +268,16 @@ describe('buildInputCommandSequence', () => {
     expect(buildInputCommandSequence({ action: 'input_text', text: 'hello world' })).toEqual([
       ['input', 'text', 'hello%sworld'],
     ])
+
+    expect(buildInputCommandSequence({ action: 'open_url', url: 'https://example.com' })).toEqual([
+      ['am', 'start', '-a', 'android.intent.action.VIEW', '-d', 'https://example.com'],
+    ])
+
+    expect(buildInputCommandSequence({ action: 'paste' })).toEqual([
+      ['input', 'keyevent', 'KEYCODE_PASTE'],
+    ])
+
+    expect(buildInputCommandSequence({ action: 'set_clipboard', text: 'hello' })).toEqual([])
 
     expect(
       buildInputCommandSequence({ action: 'input_text', text: 'hello world', clear: true }),

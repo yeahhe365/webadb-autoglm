@@ -70,7 +70,7 @@ async function serveStatic(request, response, distDir) {
     return
   }
 
-  response.writeHead(200, { 'Content-Type': contentType(pathToServe) })
+  response.writeHead(200, responseHeaders(pathToServe, distDir))
   if (request.method === 'HEAD') {
     response.end()
     return
@@ -143,6 +143,24 @@ function contentType(filePath) {
     return 'application/json; charset=utf-8'
   }
   return 'application/octet-stream'
+}
+
+function responseHeaders(filePath, distDir) {
+  return {
+    'Content-Type': contentType(filePath),
+    'Cache-Control': cacheControl(filePath, distDir),
+  }
+}
+
+function cacheControl(filePath, distDir) {
+  const relativePath = path.relative(distDir, filePath).replaceAll(path.sep, '/')
+  if (relativePath === 'index.html' || path.extname(filePath) === '.html') {
+    return 'no-cache'
+  }
+  if (relativePath.startsWith('assets/')) {
+    return 'public, max-age=31536000, immutable'
+  }
+  return 'public, max-age=3600'
 }
 
 function isMainModule() {

@@ -6,7 +6,7 @@ import {
 } from '../lib/runLogEntries'
 
 export const MAX_RUN_LOG_ENTRIES = 80
-export const MAX_RUN_LOG_SCREENSHOTS = 12
+export const MAX_RUN_LOG_SCREENSHOTS = 6
 
 export function useRunLog() {
   const [logs, setLogs] = useState<LogEntry[]>([])

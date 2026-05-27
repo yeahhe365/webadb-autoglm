@@ -1,4 +1,4 @@
-import { Check, Maximize2, Minimize2, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { Check, ImageOff, Maximize2, Minimize2, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react'
 import {
   useEffect,
   useRef,
@@ -39,6 +39,13 @@ export function PhoneStage({
   const hasScreenshot = displayedScreenshot !== null
   const isFullscreenPreview = hasScreenshot && fullscreen
   const stageLabel = displayedScreenshot ? copy.androidScreenshot : copy.noScreenshot
+  const stageClassName = [
+    'phone-stage',
+    isFullscreenPreview ? 'phone-stage-fullscreen' : '',
+    hasScreenshot ? 'phone-stage-has-screenshot' : 'phone-stage-empty',
+  ]
+    .filter(Boolean)
+    .join(' ')
   const zoomPercent = Math.round(zoom * 100)
   const surfacePercent = hasScreenshot ? zoomPercent : 100
   const screenshotLayerStyle =
@@ -169,10 +176,7 @@ export function PhoneStage({
   }
 
   return (
-    <section
-      className={isFullscreenPreview ? 'phone-stage phone-stage-fullscreen' : 'phone-stage'}
-      aria-label={stageLabel}
-    >
+    <section className={stageClassName} aria-label={stageLabel}>
       <>
         <div
           className={isFullscreenPreview ? 'phone-frame phone-frame-fullscreen' : 'phone-frame'}
@@ -194,7 +198,11 @@ export function PhoneStage({
                   openButtonLabel={copy.openScreenshotFor(copy.androidScreenshot)}
                   dialogLabel={copy.screenshotDialogFor(copy.androidScreenshot)}
                   closeLabel={copy.closeScreenshotPreview}
+                  resetZoomLabel={copy.resetScreenshotZoom}
                   thumbnailClassName="phone-screenshot-button"
+                  zoomControlsLabel={copy.screenshotZoomControls}
+                  zoomInLabel={copy.zoomInScreenshot}
+                  zoomOutLabel={copy.zoomOutScreenshot}
                 >
                   <span
                     className="screenshot-visible-layer"
@@ -224,7 +232,13 @@ export function PhoneStage({
                   </span>
                 </ScreenshotLightbox>
               ) : (
-                <div className="phone-screen-placeholder" aria-hidden="true" />
+                <div className="phone-screen-placeholder">
+                  <div className="phone-empty-state">
+                    <ImageOff size={22} aria-hidden="true" />
+                    <strong>{copy.noScreenshot}</strong>
+                    <span>{copy.noScreenshotHint}</span>
+                  </div>
+                </div>
               )}
             </div>
           </div>

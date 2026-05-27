@@ -6,6 +6,7 @@
 .conversation-panel {
   background: var(--panel-bg);
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
   padding: 0;
   position: relative;
@@ -19,7 +20,7 @@
 }
 
 .panel-title-action {
-  border-radius: 12px;
+  border-radius: 8px;
   flex: 0 0 auto;
   font-size: 13px;
   min-height: 34px;
@@ -27,34 +28,133 @@
 }
 
 .pending-action {
-  border-top: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 34%, transparent), transparent),
+    var(--panel-bg);
+  border: 1px solid color-mix(in srgb, var(--accent-soft-border) 88%, transparent);
+  border-radius: 8px;
+  box-shadow:
+    0 14px 34px color-mix(in srgb, var(--shadow-panel) 70%, transparent),
+    0 1px 0 color-mix(in srgb, var(--on-primary) 22%, transparent) inset;
   display: grid;
-  gap: 10px;
+  gap: 12px;
   margin: 0 14px 14px;
-  padding-top: 14px;
+  padding: 12px;
+}
+
+.chat-stream > .pending-action {
+  margin: 4px 0 0;
+}
+
+.pending-action-body {
+  align-items: flex-start;
+  display: grid;
+  gap: 11px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.pending-action .pending-action-icon {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft-border);
+  color: var(--accent);
+  height: 34px;
+  margin-top: 1px;
+  width: 34px;
+}
+
+.pending-action .pending-action-icon svg {
+  height: 17px;
+  width: 17px;
+}
+
+.pending-action-content {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
 
 .pending-header {
   align-items: center;
   display: flex;
+  gap: 10px;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .pending-header span {
-  color: var(--text);
+  color: var(--accent-soft-text);
+  font-size: 12px;
   font-weight: 800;
+  text-transform: uppercase;
 }
 
 .pending-header small {
-  color: var(--text-soft);
+  background: color-mix(in srgb, var(--accent-soft) 66%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-soft-border) 76%, transparent);
+  border-radius: 999px;
+  color: var(--accent-soft-text);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 5px 8px;
 }
 
-.pending-action p {
-  background: var(--subtle-bg);
-  border: 1px solid var(--border);
+.pending-step-meta {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.pending-action-name {
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.pending-action-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pending-action-chip {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent-soft) 58%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-soft-border) 72%, transparent);
+  border-radius: 999px;
+  color: var(--accent-soft-text);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+  max-width: min(100%, 160px);
+  min-height: 22px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-action-preview {
+  background: color-mix(in srgb, var(--subtle-bg) 88%, var(--panel-bg));
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
   border-radius: 8px;
   color: var(--text-secondary);
+  line-height: 1.4;
   margin: 0;
-  min-height: 46px;
-  padding: 11px;
+  min-height: 40px;
+  overflow-wrap: anywhere;
+  padding: 10px;
+}
+
+.pending-action-button {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset;
 }

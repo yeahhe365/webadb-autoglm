@@ -71,7 +71,10 @@ describe('useAgentRunController', () => {
         },
         ensureSession: () => session,
         maxSteps: 3,
+        memoryEnabled: false,
+        memoryItems: [],
         modelConfig: { baseUrl: 'https://api.example.com/v1', apiKey: 'key', model: 'm' },
+        onMemoryItem: vi.fn(),
         pendingStep: null,
         runTask: async (_id, _label, action) => {
           await action()

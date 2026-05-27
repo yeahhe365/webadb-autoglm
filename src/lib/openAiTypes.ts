@@ -1,12 +1,32 @@
-import type { DeviceState, InstalledApp } from '../adapters/deviceTypes'
+import type { DeviceScreenTree, DeviceState, InstalledApp } from '../adapters/deviceTypes'
 import type { ActionProtocol } from './actionProtocol'
 import type { CustomToolDescriptor, SecretDescriptor } from './agentResources'
 import type { ScreenSize } from './actionTypes'
+import type { ActionToolSignature } from './toolRegistry'
+
+export const REASONING_EFFORT_VALUES = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+] as const
+
+export type ReasoningEffort = (typeof REASONING_EFFORT_VALUES)[number]
+
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return (
+    typeof value === 'string' &&
+    REASONING_EFFORT_VALUES.includes(value as ReasoningEffort)
+  )
+}
 
 export type ModelConfig = {
   baseUrl: string
   apiKey: string
   model: string
+  reasoningEffort?: ReasoningEffort
   stream?: boolean
 }
 
@@ -19,9 +39,13 @@ export type CompletionRequest = ModelConfig & {
   deviceScreen?: ScreenSize
   currentApp?: string
   deviceState?: DeviceState
+  screenTree?: DeviceScreenTree
   history?: readonly AgentHistoryItem[]
   appCard?: string
   installedApps?: readonly InstalledApp[]
+  memoryEnabled?: boolean
+  memoryItems?: readonly string[]
+  actionTools?: Record<string, ActionToolSignature>
   promptContext?: string
   customTools?: readonly CustomToolDescriptor[]
   secrets?: readonly SecretDescriptor[]
@@ -90,6 +114,7 @@ export type ChatCompletionPayload = {
   model: string
   temperature: number
   max_tokens: number
+  reasoning_effort?: ReasoningEffort
   stream?: boolean
   response_format?: {
     type: 'json_object'

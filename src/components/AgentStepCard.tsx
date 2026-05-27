@@ -1,30 +1,17 @@
 import {
   AlertTriangle,
-  ArrowUpDown,
-  AppWindow,
   CheckCircle2,
   CircleDashed,
-  CircleDot,
-  Code2,
   Hand,
-  Home,
-  Keyboard,
-  KeyRound,
   LoaderCircle,
-  MessageSquareText,
-  MousePointerClick,
-  PenLine,
-  RotateCcw,
-  TextCursorInput,
-  Touchpad,
   XCircle,
 } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
-import type { AgentAction } from '../lib/actionTypes'
 import type { AgentTurn } from '../lib/agentThread'
 import type { AppCopy } from '../lib/appCopy'
+import { getActionDisplay } from './actionDisplay'
+import { formatCurrentAppLabel } from './deviceDisplay'
 import { LazyDetails } from './LazyDetails'
-import { MarkdownContent } from './MarkdownContent'
+import { LazyMarkdownContent } from './LazyMarkdownContent'
 
 type AgentStepCardProps = {
   copy: AppCopy
@@ -41,6 +28,7 @@ export function AgentStepCard({ copy, isActive, turn }: AgentStepCardProps) {
   const stepSummary = formatStepSummary(turn)
   const actionDisplay = getActionDisplay(turn.action, copy)
   const ActionIcon = actionDisplay.icon
+  const currentAppLabel = formatCurrentAppLabel(turn.deviceSnapshot.currentApp, copy)
 
   return (
     <article
@@ -65,15 +53,36 @@ export function AgentStepCard({ copy, isActive, turn }: AgentStepCardProps) {
         </div>
       </div>
 
-      <MarkdownContent className="agent-step-summary" content={stepSummary} />
+      <LazyMarkdownContent className="agent-step-summary" content={stepSummary} />
+      <div className="agent-step-quick-meta" aria-label={copy.stepDetails}>
+        <span className="agent-step-chip" title={copy.stepTiming(turn.timing.totalMs)}>
+          {turn.timing.totalMs} ms
+        </span>
+        <span
+          className="agent-step-chip"
+          title={`${copy.currentApp}: ${currentAppLabel}`}
+        >
+          {currentAppLabel}
+        </span>
+        {turn.toolName ? (
+          <span className="agent-step-chip" title={`${copy.stepTool}: ${turn.toolName}`}>
+            {turn.toolName}
+          </span>
+        ) : null}
+      </div>
 
       <LazyDetails className="agent-step-details" summary={copy.stepDetails}>
         <div className="agent-step-details-grid">
           <span>{copy.stepTiming(turn.timing.totalMs)}</span>
           <span>
-            {copy.currentApp}: {turn.deviceSnapshot.currentApp}
+            {copy.currentApp}: {currentAppLabel}
           </span>
           {packageName ? <span>{packageName}</span> : null}
+          {turn.toolName ? (
+            <span>
+              {copy.stepTool}: {turn.toolName}
+            </span>
+          ) : null}
         </div>
         <span className="agent-step-detail-title">{copy.stepAction}</span>
         <pre>{turn.preview}</pre>
@@ -88,33 +97,6 @@ export function AgentStepCard({ copy, isActive, turn }: AgentStepCardProps) {
       </LazyDetails>
     </article>
   )
-}
-
-const ACTION_ICONS = {
-  back: RotateCcw,
-  call_api: Code2,
-  custom_tool: Code2,
-  done: CheckCircle2,
-  double_tap: Touchpad,
-  home: Home,
-  input_text: TextCursorInput,
-  interact: Hand,
-  key: Keyboard,
-  launch: AppWindow,
-  long_press: Hand,
-  note: PenLine,
-  swipe: ArrowUpDown,
-  take_over: MessageSquareText,
-  tap: MousePointerClick,
-  type_secret: KeyRound,
-  wait: CircleDot,
-} satisfies Record<AgentAction['action'], LucideIcon>
-
-function getActionDisplay(action: AgentAction, copy: AppCopy) {
-  return {
-    icon: ACTION_ICONS[action.action],
-    label: copy.actionNames[action.action],
-  }
 }
 
 function StepStatusIcon({ tone }: { tone: StepTone }) {

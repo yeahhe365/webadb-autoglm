@@ -96,6 +96,54 @@ describe('buildChatCompletionPayload', () => {
     expect(payload.messages[0].content).toContain('continue autonomously')
   })
 
+  it('keeps memory disabled by default in the system prompt and user context', () => {
+    const payload = buildChatCompletionPayload({
+      model: 'agent-model',
+      task: 'Open settings',
+      screenshotDataUrl: 'data:image/png;base64,abc123',
+      screen: { width: 1080, height: 2400 },
+      memoryItems: ['Use the work account.'],
+    })
+
+    expect(payload.messages[0].content).toContain('Memory is disabled')
+    expect(payload.messages[0].content).not.toContain('Use note/remember to store short durable facts')
+
+    const userMessage = payload.messages[1]
+    if (
+      userMessage.role !== 'user' ||
+      !Array.isArray(userMessage.content) ||
+      userMessage.content[0].type !== 'text'
+    ) {
+      throw new Error('Expected first user content item to be text.')
+    }
+    expect(userMessage.content[0].text).not.toContain('Durable memory:')
+    expect(userMessage.content[0].text).not.toContain('Use the work account.')
+  })
+
+  it('includes memory instructions and durable memory when enabled', () => {
+    const payload = buildChatCompletionPayload({
+      model: 'agent-model',
+      task: 'Open settings',
+      screenshotDataUrl: 'data:image/png;base64,abc123',
+      screen: { width: 1080, height: 2400 },
+      memoryEnabled: true,
+      memoryItems: ['Use the work account.'],
+    })
+
+    expect(payload.messages[0].content).toContain('Use note/remember to store short durable facts')
+
+    const userMessage = payload.messages[1]
+    if (
+      userMessage.role !== 'user' ||
+      !Array.isArray(userMessage.content) ||
+      userMessage.content[0].type !== 'text'
+    ) {
+      throw new Error('Expected first user content item to be text.')
+    }
+    expect(userMessage.content[0].text).toContain('Durable memory:')
+    expect(userMessage.content[0].text).toContain('- Use the work account.')
+  })
+
   it('describes screenshot coordinates and device mapping in the user context', () => {
     const payload = buildChatCompletionPayload({
       model: 'agent-model',
@@ -245,7 +293,37 @@ describe('buildChatCompletionPayload', () => {
     expect(userMessage.content[0].text).toContain('gmail_password: Gmail password')
   })
 
-  it('includes every installed app in the user context', () => {
+  it('includes runtime action tool signatures in the user context', () => {
+    const payload = buildChatCompletionPayload({
+      model: 'agent-model',
+      task: 'Open settings',
+      screenshotDataUrl: 'data:image/png;base64,abc123',
+      screen: { width: 1080, height: 2400 },
+      actionTools: {
+        tap: {
+          description: 'Tap a screen coordinate.',
+          parameters: {
+            x: { type: 'number', required: true },
+            y: { type: 'number', required: true },
+          },
+        },
+      },
+    })
+
+    const userMessage = payload.messages[1]
+    if (
+      userMessage.role !== 'user' ||
+      !Array.isArray(userMessage.content) ||
+      userMessage.content[0].type !== 'text'
+    ) {
+      throw new Error('Expected first user content item to be text.')
+    }
+
+    expect(userMessage.content[0].text).toContain('<available_action_tools>')
+    expect(userMessage.content[0].text).toContain('tap(x:number required, y:number required)')
+  })
+
+  it('caps installed apps in the user context while keeping relevant matches', () => {
     const payload = buildChatCompletionPayload({
       model: 'agent-model',
       task: 'Open app44',
@@ -267,6 +345,8 @@ describe('buildChatCompletionPayload', () => {
 
     expect(userMessage.content[0].text).toContain('app44: com.example.app44')
     expect(userMessage.content[0].text).toContain('app0: com.example.app0')
+    expect(userMessage.content[0].text).toContain('... truncated 5 more apps')
+    expect(userMessage.content[0].text).not.toContain('app39: com.example.app39')
   })
 
   it('preserves conversation messages and injects current context into the latest user turn', () => {
@@ -341,7 +421,7 @@ describe('buildChatCompletionPayload', () => {
       promptContext: 'Task: Open settings\nPrevious steps: latest compact summary',
     })
 
-    expect(payload.messages).toHaveLength(MAX_PROMPT_CONVERSATION_MESSAGES + 2)
+    expect(payload.messages.length).toBeLessThanOrEqual(MAX_PROMPT_CONVERSATION_MESSAGES + 2)
     expect(payload.messages[1]).toEqual({
       role: 'user',
       content: 'Open Settings.',
@@ -350,6 +430,56 @@ describe('buildChatCompletionPayload', () => {
       false,
     )
     expect(JSON.stringify(payload.messages.at(-1))).toContain('latest compact summary')
+  })
+
+  it('caps noisy observation messages inside the prompt conversation window', () => {
+    const conversation = [
+      { id: 'u1', role: 'user' as const, content: 'Open Settings.' },
+      ...Array.from({ length: 12 }, (_, index) => ({
+        id: `o${index}`,
+        role: 'observation' as const,
+        content: `Executed step ${index}`,
+      })),
+      { id: 'u2', role: 'user' as const, content: 'Continue.' },
+    ]
+
+    const payload = buildChatCompletionPayload({
+      model: 'agent-model',
+      task: 'Open settings',
+      conversation,
+      screenshotDataUrl: 'data:image/png;base64,abc123',
+      screen: { width: 1080, height: 2400 },
+      promptContext: 'Task: Open settings',
+    })
+
+    const serialized = JSON.stringify(payload.messages)
+    expect(serialized).not.toContain('Executed step 0')
+    expect(serialized).not.toContain('Executed step 5')
+    expect(serialized).toContain('Executed step 6')
+    expect(serialized).toContain('Executed step 11')
+    expect(serialized).toContain('Continue.')
+  })
+
+  it('truncates oversized conversation content before sending it to the model', () => {
+    const payload = buildChatCompletionPayload({
+      model: 'agent-model',
+      task: 'Open settings',
+      conversation: [
+        { id: 'u1', role: 'user', content: `Open Settings. ${'u'.repeat(7000)}` },
+        { id: 'a1', role: 'assistant', content: `{"action":"note","message":"${'a'.repeat(7000)}"}` },
+        { id: 'o1', role: 'observation', content: `tool output ${'o'.repeat(7000)}` },
+        { id: 'u2', role: 'user', content: 'Continue.' },
+      ],
+      screenshotDataUrl: 'data:image/png;base64,abc123',
+      screen: { width: 1080, height: 2400 },
+      promptContext: 'Task: Open settings',
+    })
+
+    const serialized = JSON.stringify(payload.messages)
+    expect(serialized).toContain('[truncated]')
+    expect(serialized).not.toContain('o'.repeat(5000))
+    expect(serialized).not.toContain('a'.repeat(6500))
+    expect(serialized).not.toContain('u'.repeat(6500))
   })
 
   it('enables streaming when requested by the model config', () => {
@@ -362,6 +492,18 @@ describe('buildChatCompletionPayload', () => {
     })
 
     expect(payload.stream).toBe(true)
+  })
+
+  it('passes reasoning effort through to action requests when configured', () => {
+    const payload = buildChatCompletionPayload({
+      model: 'gpt-5.5',
+      reasoningEffort: 'high',
+      task: 'Open settings',
+      screenshotDataUrl: 'data:image/png;base64,abc123',
+      screen: { width: 1080, height: 2400 },
+    })
+
+    expect(payload.reasoning_effort).toBe('high')
   })
 
   it('uses a prebuilt prompt context when provided', () => {
@@ -396,6 +538,7 @@ describe('buildFinalResponsePayload', () => {
   it('builds a text-only final response request without JSON response format', () => {
     const payload = buildFinalResponsePayload({
       model: 'agent-model',
+      reasoningEffort: 'medium',
       task: 'Open Bluetooth settings',
       conversation: [
         { id: 'u1', role: 'user', content: 'Open Bluetooth settings' },
@@ -414,6 +557,7 @@ describe('buildFinalResponsePayload', () => {
     })
 
     expect(payload.response_format).toBeUndefined()
+    expect(payload.reasoning_effort).toBe('medium')
     expect(payload.messages[0].content).toContain('final user-facing answer')
     expect(payload.messages.at(-1)).toEqual({
       role: 'user',

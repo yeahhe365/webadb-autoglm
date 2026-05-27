@@ -1,32 +1,34 @@
 import {
-  Grid2x2,
-  KeyRound,
+  BrainCircuit,
   PanelLeftClose,
   PanelLeftOpen,
-  Settings2,
-  SquareTerminal,
-  Stethoscope,
   Usb,
+  Wrench,
 } from 'lucide-react'
 import type { AppCopy } from '../lib/appCopy'
 import type { ActionProtocol } from '../lib/actionProtocol'
 import type { ModelConfig } from '../lib/openAiTypes'
-import { ConfigRail } from './ConfigRail'
+import { ConfigRail, type ConfigRailItem } from './ConfigRail'
 import { CONFIG_TARGET_IDS, type ConfigTarget } from './configTargets'
-import {
-  DevicePanel,
-  type DevicePanelActions,
-  type DevicePanelOptions,
-  type DevicePanelState,
-} from './DevicePanel'
+import { DeviceHomeOptionsSection } from './DeviceHomeOptionsSection'
+import { DevicePanel } from './DevicePanel'
+import { HomePreferencesSection } from './HomePreferencesSection'
+import type {
+  DeviceControlActions,
+  DeviceControlOptions,
+  DeviceControlState,
+} from '../lib/deviceControlTypes'
 import { ModelPanel } from './ModelPanel'
+
+type ConfigRailTarget = ConfigTarget | 'toolbox'
 
 export type ConfigSidebarProps = {
   copy: AppCopy
-  devicePanelActions: DevicePanelActions
-  devicePanelOptions: DevicePanelOptions
-  devicePanelState: DevicePanelState
+  deviceActions: DeviceControlActions
+  deviceOptions: DeviceControlOptions
+  deviceState: DeviceControlState
   isOpen: boolean
+  memoryEnabled: boolean
   modelConfig: ModelConfig
   actionProtocol: ActionProtocol
   onActionProtocolChange: (value: ActionProtocol) => void
@@ -34,27 +36,51 @@ export type ConfigSidebarProps = {
     key: Key,
     value: ModelConfig[Key],
   ) => void
+  onMemoryEnabledChange: (value: boolean) => void
+  onOpenToolbox: () => void
+  onScreenBlackoutDuringAutoControlChange: (value: boolean) => void
   onSelectTarget: (target: ConfigTarget) => void
   onStreamResponsesChange: (value: boolean) => void
   onToggleOpen: () => void
+  screenBlackoutDuringAutoControl: boolean
   streamResponses: boolean
 }
 
 export function ConfigSidebar({
   copy,
-  devicePanelActions,
-  devicePanelOptions,
-  devicePanelState,
+  deviceActions,
+  deviceOptions,
+  deviceState,
   isOpen,
+  memoryEnabled,
   modelConfig,
   actionProtocol,
   onActionProtocolChange,
   onModelConfigChange,
+  onMemoryEnabledChange,
+  onOpenToolbox,
+  onScreenBlackoutDuringAutoControlChange,
   onSelectTarget,
   onStreamResponsesChange,
   onToggleOpen,
+  screenBlackoutDuringAutoControl,
   streamResponses,
 }: ConfigSidebarProps) {
+  const railItems: ConfigRailItem<ConfigRailTarget>[] = [
+    { icon: BrainCircuit, label: copy.model, target: 'model' },
+    { icon: Usb, label: copy.device, target: 'device' },
+    { icon: Wrench, label: copy.toolbox, target: 'toolbox' },
+  ]
+
+  const handleRailSelect = (target: ConfigRailTarget) => {
+    if (target === 'toolbox') {
+      onOpenToolbox()
+      return
+    }
+
+    onSelectTarget(target)
+  }
+
   return (
     <aside
       aria-label={copy.configurationPanel}
@@ -97,31 +123,32 @@ export function ConfigSidebar({
           </section>
 
           <DevicePanel
-            actions={devicePanelActions}
+            actions={deviceActions}
             copy={copy}
-            options={devicePanelOptions}
-            sectionIds={{
-              device: CONFIG_TARGET_IDS.device,
-              deviceOptions: CONFIG_TARGET_IDS.options,
-              directCommands: CONFIG_TARGET_IDS.commands,
-              doctor: CONFIG_TARGET_IDS.doctor,
-              installedApps: CONFIG_TARGET_IDS.apps,
-            }}
-            state={devicePanelState}
+            onOpenToolbox={onOpenToolbox}
+            sectionId={CONFIG_TARGET_IDS.device}
+            state={deviceState}
+          />
+
+          <DeviceHomeOptionsSection
+            actions={deviceActions}
+            copy={copy}
+            options={deviceOptions}
+          />
+
+          <HomePreferencesSection
+            copy={copy}
+            memoryEnabled={memoryEnabled}
+            screenBlackoutDuringAutoControl={screenBlackoutDuringAutoControl}
+            onMemoryEnabledChange={onMemoryEnabledChange}
+            onScreenBlackoutDuringAutoControlChange={onScreenBlackoutDuringAutoControlChange}
           />
         </div>
       ) : (
         <ConfigRail
           copy={copy}
-          items={[
-            { icon: KeyRound, label: copy.model, target: 'model' },
-            { icon: Usb, label: copy.device, target: 'device' },
-            { icon: Grid2x2, label: copy.installedApps, target: 'apps' },
-            { icon: SquareTerminal, label: copy.directCommands, target: 'commands' },
-            { icon: Stethoscope, label: copy.runDoctor, target: 'doctor' },
-            { icon: Settings2, label: copy.deviceOptions, target: 'options' },
-          ]}
-          onSelect={onSelectTarget}
+          items={railItems}
+          onSelect={handleRailSelect}
         />
       )}
     </aside>

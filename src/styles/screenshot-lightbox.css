@@ -29,13 +29,18 @@
   align-items: center;
   color: var(--modal-text);
   display: flex;
-  justify-content: space-between;
   gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
 }
 
 .screenshot-modal-header strong {
   display: block;
   font-size: 14px;
+  max-width: min(54vw, 640px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .screenshot-modal-header small {
@@ -49,6 +54,51 @@
   flex: 0 0 auto;
   height: 36px;
   width: 36px;
+}
+
+.screenshot-modal-toolbar,
+.screenshot-modal-zoom-controls {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.screenshot-modal-zoom-controls {
+  background: rgba(255, 255, 255, 0.075);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 3px;
+}
+
+.screenshot-modal-zoom-controls button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--modal-text);
+  flex: 0 0 auto;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  width: 30px;
+}
+
+.screenshot-modal-zoom-controls button:hover:not(:disabled),
+.screenshot-modal-zoom-controls button:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.screenshot-modal-zoom-controls button:disabled {
+  color: color-mix(in srgb, var(--modal-text) 42%, transparent);
+  opacity: 1;
+}
+
+.screenshot-modal-zoom-controls span {
+  color: var(--modal-text);
+  flex: 0 0 48px;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
 }
 
 .screenshot-modal-viewport {
@@ -65,4 +115,64 @@
   object-fit: contain;
   transition: height 80ms ease-out;
   width: auto;
+}
+
+@media (max-width: 640px) {
+  .screenshot-modal {
+    padding: 10px;
+  }
+
+  .screenshot-modal-panel {
+    gap: 10px;
+    max-height: calc(100dvh - 20px);
+    padding: 10px;
+  }
+
+  .screenshot-modal-header {
+    align-items: flex-start;
+  }
+
+  .screenshot-modal-header strong {
+    max-width: 120px;
+  }
+
+  .screenshot-modal-toolbar {
+    gap: 6px;
+  }
+
+  .screenshot-modal-zoom-controls {
+    gap: 2px;
+  }
+
+  .screenshot-modal-zoom-controls span {
+    flex-basis: 42px;
+  }
+
+  .screenshot-modal-viewport {
+    height: calc(100dvh - 86px);
+  }
+}
+
+@media (max-width: 380px) {
+  .screenshot-modal-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .screenshot-modal-header strong {
+    max-width: 100%;
+  }
+
+  .screenshot-modal-toolbar {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .screenshot-modal-zoom-controls {
+    flex: 0 0 auto;
+  }
+
+  .screenshot-modal-viewport {
+    height: calc(100dvh - 132px);
+  }
 }

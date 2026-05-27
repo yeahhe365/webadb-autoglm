@@ -5,6 +5,7 @@
 
 .log-drawer > summary {
   grid-template-columns: 4px minmax(0, auto) minmax(0, 1fr) 14px;
+  min-height: 44px;
 }
 
 .log-drawer > summary small {
@@ -31,7 +32,7 @@
   border: 0;
   box-shadow: none;
   margin: 0;
-  padding: 16px;
+  padding: 18px;
 }
 
 .log-list {
@@ -40,11 +41,41 @@
   margin-top: 14px;
 }
 
+.log-empty-state {
+  align-items: center;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-bg-elevated) 48%, transparent), transparent),
+  color-mix(in srgb, var(--subtle-bg) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: 8px;
+  color: var(--text-soft);
+  display: flex;
+  gap: 9px;
+  min-height: 48px;
+  padding: 0 13px;
+}
+
+.log-empty-state svg {
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.log-empty-state p {
+  font-size: 13px;
+  margin: 0;
+}
+
 .log-entry {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-bg-elevated) 42%, transparent), transparent),
+    color-mix(in srgb, var(--subtle-bg) 76%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
   border-left: 4px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--on-primary) 16%, transparent) inset;
   display: grid;
   gap: 5px;
-  padding: 10px 12px;
+  padding: 11px 12px;
 }
 
 .log-entry.with-screenshot {
@@ -76,15 +107,15 @@
 }
 
 .log-entry.ok {
-  border-color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 70%, var(--border));
 }
 
 .log-entry.warn {
-  border-color: #c18421;
+  border-color: color-mix(in srgb, var(--warn) 78%, var(--border));
 }
 
 .log-entry.error {
-  border-color: #c94b32;
+  border-color: color-mix(in srgb, var(--danger) 78%, var(--border));
 }
 
 .log-entry time {
@@ -109,8 +140,10 @@
 }
 
 .step-timeline {
-  background: var(--subtle-bg);
-  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-bg) 38%, transparent), transparent),
+    color-mix(in srgb, var(--subtle-bg) 88%, var(--panel-bg));
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
   border-radius: 8px;
   display: grid;
   gap: 8px;

@@ -3,6 +3,7 @@ import AdbWebCredentialStore from '@yume-chan/adb-credential-web'
 import { AdbDaemonWebUsbDeviceManager } from '@yume-chan/adb-daemon-webusb'
 import { ReadableStream } from '@yume-chan/stream-extra'
 import type { AgentAction } from '../lib/actionTypes'
+import { delayWithAbort, isAbortError, throwIfAborted, withAbort } from '../lib/abortSignal'
 import {
   ADB_KEYBOARD_REMOTE_APK_PATH,
   encodeAdbKeyboardText,
@@ -51,6 +52,12 @@ import {
   buildWakeDeviceCommand,
   normalizeStayAwakeSetting,
 } from './stayAwakeCommands'
+import {
+  buildDumpScreenTreeCommand,
+  buildReadScreenTreeCommand,
+  buildRemoveScreenTreeCommand,
+  parseUiAutomatorDumpXml,
+} from './uiAutomator'
 
 const ADB_KEYBOARD_BROADCAST_ERROR = [
   'ADB Keyboard or AutoGLM Keyboard was detected but did not accept the text or clear broadcast.',
@@ -73,6 +80,7 @@ export class WebAdbDeviceBackend implements DeviceBackend {
   #stayAwakeRestoreValue: string | null = null
   #stayAwakeEnabled = false
   #screenBlackoutRestoreSettings: ScreenBlackoutRestoreSettings | null = null
+  #clipboardText: string | null = null
 
   get isConnected() {
     return this.#adb !== null
@@ -83,6 +91,12 @@ export class WebAdbDeviceBackend implements DeviceBackend {
   }
 
   async connect(): Promise<DeviceInfo> {
+    if (this.#adb) {
+      await this.disconnect()
+    }
+
+    this.#installedApps = null
+    this.#clipboardText = null
     const manager = AdbDaemonWebUsbDeviceManager.BROWSER
     if (!manager) {
       throw new DeviceBackendError('WebUSB is not available in this browser.')
@@ -120,6 +134,8 @@ export class WebAdbDeviceBackend implements DeviceBackend {
     await adb?.close()
     this.#adb = null
     this.#deviceInfo = null
+    this.#installedApps = null
+    this.#clipboardText = null
   }
 
   async screenshot(): Promise<DeviceScreenshot> {
@@ -138,6 +154,15 @@ export class WebAdbDeviceBackend implements DeviceBackend {
     return retryDeviceOperation(() => this.#readDeviceState(), {
       label: 'device state',
       recoverAfterAttempt: DEVICE_READ_RECOVER_AFTER_ATTEMPT,
+      recover: () => this.#recoverDeviceRead(),
+    })
+  }
+
+  async getScreenTree() {
+    return retryDeviceOperation(() => this.#readScreenTree(), {
+      label: 'screen tree',
+      maxAttempts: 2,
+      recoverAfterAttempt: 1,
       recover: () => this.#recoverDeviceRead(),
     })
   }
@@ -170,15 +195,18 @@ export class WebAdbDeviceBackend implements DeviceBackend {
     const adb = this.#requireAdb()
     const bytes = await adb.subprocess.noneProtocol.spawnWait(['screencap', '-p'])
     const screen = parsePngSize(bytes)
-    const dataUrl = bytesToDataUrl(bytes)
     let modelScreenshot:
       | { modelDataUrl: string; modelScreen: typeof screen; modelGridDivisions?: number }
       | undefined
+    const imageUrl = createImageObjectUrl(bytes)
 
     try {
-      modelScreenshot = await preprocessScreenshotForModel({ dataUrl, screen })
+      modelScreenshot = await preprocessScreenshotForModel({ dataUrl: imageUrl, screen })
     } catch {
+      const dataUrl = bytesToDataUrl(bytes)
       modelScreenshot = { modelDataUrl: dataUrl, modelScreen: screen }
+    } finally {
+      revokeImageObjectUrl(imageUrl)
     }
 
     return {
@@ -198,6 +226,17 @@ export class WebAdbDeviceBackend implements DeviceBackend {
     return {
       ...parseDeviceStateFromDumpsys(windowOutput),
       ...(keyboard ? { keyboard } : {}),
+    }
+  }
+
+  async #readScreenTree() {
+    const adb = this.#requireAdb()
+    await adb.subprocess.noneProtocol.spawnWaitText(buildDumpScreenTreeCommand())
+    try {
+      const xml = await adb.subprocess.noneProtocol.spawnWaitText(buildReadScreenTreeCommand())
+      return parseUiAutomatorDumpXml(xml)
+    } finally {
+      await adb.subprocess.noneProtocol.spawnWaitText(buildRemoveScreenTreeCommand()).catch(() => undefined)
     }
   }
 
@@ -240,8 +279,11 @@ export class WebAdbDeviceBackend implements DeviceBackend {
   }
 
   async execute(action: AgentAction, options?: ExecuteActionOptions): Promise<string> {
+    const signal = options?.signal
+    throwIfAborted(signal)
+
     if (action.action === 'wait') {
-      await delay(action.ms)
+      await delayWithAbort(action.ms, signal)
       return `Waited ${action.ms}ms.`
     }
 
@@ -265,18 +307,50 @@ export class WebAdbDeviceBackend implements DeviceBackend {
       throw new DeviceBackendError(`Unsupported call_api action: ${action.instruction}`)
     }
 
+    if (action.action === 'set_clipboard') {
+      this.#clipboardText = action.text
+      const syncResult = await this.#setDeviceClipboard(action.text, signal).catch((caught) => {
+        if (isAbortError(caught)) {
+          throw caught
+        }
+        return caught instanceof Error ? caught.message : String(caught)
+      })
+      return await this.#withActionSettle(
+        [
+          `Stored ${action.text.length} clipboard characters in WebDroid.`,
+          syncResult ? `Device clipboard sync: ${syncResult}` : null,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        signal,
+      )
+    }
+
+    if (action.action === 'paste' && this.#clipboardText) {
+      const executed = await this.#pasteWebDroidClipboardText(this.#clipboardText, signal)
+      return await this.#withActionSettle(
+        [executed, 'Pasted WebDroid clipboard text.'].join('\n'),
+        signal,
+      )
+    }
+
     if (
       action.action === 'input_text' &&
       (action.clear || this.#preferAdbKeyboard || !isAndroidInputTextSafe(action.text))
     ) {
-      const executed = await this.#inputTextWithAdbKeyboard(action.text, { clear: action.clear })
-      return await this.#withActionSettle(executed)
+      const executed = await this.#inputTextWithAdbKeyboard(action.text, {
+        clear: action.clear,
+        signal,
+      })
+      return await this.#withActionSettle(executed, signal)
     }
 
     await assertSensitiveActionConfirmed(action, options)
+    throwIfAborted(signal)
 
     const installedApps =
       action.action === 'launch' ? await this.getInstalledApps().catch(() => []) : undefined
+    throwIfAborted(signal)
     const sequence = buildInputCommandSequence(action, this.#timing, installedApps)
     if (sequence.length === 0) {
       return 'No device command required.'
@@ -284,11 +358,11 @@ export class WebAdbDeviceBackend implements DeviceBackend {
 
     const executed: string[] = []
     for (const step of sequence) {
-      await this.#executeCommandStep(step)
+      await this.#executeCommandStep(step, signal)
       executed.push(isWaitStep(step) ? `wait ${step.waitMs}ms` : step.join(' '))
     }
 
-    return await this.#withActionSettle(executed.join('\n'))
+    return await this.#withActionSettle(executed.join('\n'), signal)
   }
 
   async enableAdbKeyboard(): Promise<string> {
@@ -392,13 +466,14 @@ export class WebAdbDeviceBackend implements DeviceBackend {
     return parseInstalledAppsFromPackageOutput(output)
   }
 
-  async #executeCommandStep(step: DeviceCommandStep) {
+  async #executeCommandStep(step: DeviceCommandStep, signal?: AbortSignal) {
+    throwIfAborted(signal)
     if (isWaitStep(step)) {
-      await delay(step.waitMs)
+      await delayWithAbort(step.waitMs, signal)
       return
     }
 
-    await this.#requireAdb().subprocess.noneProtocol.spawnWait(step)
+    await withAbort(this.#requireAdb().subprocess.noneProtocol.spawnWait(step), signal)
   }
 
   async #restoreScreenBlackout(adb: Adb) {
@@ -430,16 +505,20 @@ export class WebAdbDeviceBackend implements DeviceBackend {
     }
   }
 
-  async #withActionSettle(result: string) {
+  async #withActionSettle(result: string, signal?: AbortSignal) {
     if (this.#timing.actionSettleMs <= 0) {
       return result
     }
 
-    await delay(this.#timing.actionSettleMs)
+    await delayWithAbort(this.#timing.actionSettleMs, signal)
     return [result, `wait ${this.#timing.actionSettleMs}ms`].filter(Boolean).join('\n')
   }
 
-  async #inputTextWithAdbKeyboard(text: string, options: { clear?: boolean } = {}) {
+  async #inputTextWithAdbKeyboard(
+    text: string,
+    options: { clear?: boolean; signal?: AbortSignal } = {},
+  ) {
+    const signal = options.signal
     const adb = this.#requireAdb()
     const keyboardIme = await this.#detectAdbKeyboardIme()
     const originalIme = await this.#getCurrentInputMethod()
@@ -452,18 +531,24 @@ export class WebAdbDeviceBackend implements DeviceBackend {
       executed.push(`ime set ${keyboardIme}`)
       await this.#sendAdbKeyboardText('')
       executed.push('am broadcast -a ADB_INPUT_B64 --es msg <empty>')
-      await delay(this.#timing.keyboardStepMs)
+      await delayWithAbort(this.#timing.keyboardStepMs, signal)
 
       if (options.clear) {
-        await adb.subprocess.noneProtocol.spawnWait(['am', 'broadcast', '-a', 'ADB_CLEAR_TEXT'])
+        await withAbort(
+          adb.subprocess.noneProtocol.spawnWait(['am', 'broadcast', '-a', 'ADB_CLEAR_TEXT']),
+          signal,
+        )
         executed.push('am broadcast -a ADB_CLEAR_TEXT')
-        await delay(this.#timing.keyboardStepMs)
+        await delayWithAbort(this.#timing.keyboardStepMs, signal)
       }
 
       const command = await this.#sendAdbKeyboardText(text)
       executed.push(command.join(' '))
-      await delay(this.#timing.keyboardStepMs)
-    } catch {
+      await delayWithAbort(this.#timing.keyboardStepMs, signal)
+    } catch (caught) {
+      if (isAbortError(caught)) {
+        throw caught
+      }
       throw new DeviceBackendError(ADB_KEYBOARD_BROADCAST_ERROR)
     } finally {
       if (originalIme && originalIme !== keyboardIme) {
@@ -473,6 +558,39 @@ export class WebAdbDeviceBackend implements DeviceBackend {
     }
 
     this.#preferAdbKeyboard = true
+    return executed.join('\n')
+  }
+
+  async #setDeviceClipboard(text: string, signal?: AbortSignal) {
+    const adb = this.#requireAdb()
+    await withAbort(adb.subprocess.noneProtocol.spawnWaitText(['cmd', 'clipboard', 'set', text]), signal)
+    return 'cmd clipboard set completed.'
+  }
+
+  async #pasteWebDroidClipboardText(text: string, signal?: AbortSignal) {
+    if (this.#preferAdbKeyboard || !isAndroidInputTextSafe(text)) {
+      try {
+        return await this.#inputTextWithAdbKeyboard(text, { signal })
+      } catch (caught) {
+        if (isAbortError(caught)) {
+          throw caught
+        }
+        await this.#executeCommandStep(['input', 'keyevent', 'KEYCODE_PASTE'], signal)
+        return [
+          'input keyevent KEYCODE_PASTE',
+          `ADB Keyboard paste fallback failed: ${
+            caught instanceof Error ? caught.message : String(caught)
+          }`,
+        ].join('\n')
+      }
+    }
+
+    const sequence = buildInputCommandSequence({ action: 'input_text', text }, this.#timing)
+    const executed: string[] = []
+    for (const step of sequence) {
+      await this.#executeCommandStep(step, signal)
+      executed.push(isWaitStep(step) ? `wait ${step.waitMs}ms` : step.join(' '))
+    }
     return executed.join('\n')
   }
 
@@ -523,10 +641,6 @@ export class WebAdbDeviceBackend implements DeviceBackend {
   }
 }
 
-export function isWebUsbSupported() {
-  return typeof navigator !== 'undefined' && 'usb' in navigator
-}
-
 function isWaitStep(step: DeviceCommandStep): step is { waitMs: number } {
   return !Array.isArray(step)
 }
@@ -538,4 +652,19 @@ function bytesToReadableStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
       controller.close()
     },
   })
+}
+
+function createImageObjectUrl(bytes: Uint8Array) {
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    return bytesToDataUrl(bytes)
+  }
+  const blobBytes = new Uint8Array(bytes)
+  return URL.createObjectURL(new Blob([blobBytes], { type: 'image/png' }))
+}
+
+function revokeImageObjectUrl(value: string) {
+  if (!value.startsWith('blob:') || typeof URL === 'undefined') {
+    return
+  }
+  URL.revokeObjectURL(value)
 }

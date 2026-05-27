@@ -1,13 +1,36 @@
-import { MessageSquare, PanelLeftClose, PanelLeftOpen, Send, Square, SquarePen } from 'lucide-react'
-import { useRef, type KeyboardEvent, type MouseEvent } from 'react'
+import {
+  ArrowDown,
+  Camera,
+  Home,
+  LoaderCircle,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Send,
+  Settings,
+  Square,
+  SquarePen,
+} from 'lucide-react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  type UIEvent,
+} from 'react'
 import type { AppCopy } from '../lib/appCopy'
+import type { AgentStep } from '../lib/agent'
 import type { BusyTask } from '../lib/busyTask'
 import type { InteractionStreamItem } from '../lib/interactionStream'
 import type { AgentConversationMessage } from '../lib/openAiTypes'
 import type { AgentThreadSummary } from '../lib/threadStore'
 import { AgentStepCard } from './AgentStepCard'
 import { ChatHistorySidebar } from './ChatHistorySidebar'
-import { MarkdownContent } from './MarkdownContent'
+import { LazyMarkdownContent } from './LazyMarkdownContent'
+import { PendingActionCard } from './PendingActionCard'
 
 type ChatPanelProps = {
   activeThreadId: string
@@ -17,16 +40,20 @@ type ChatPanelProps = {
   interactionItems?: InteractionStreamItem[]
   copy: AppCopy
   historySidebarOpen: boolean
+  pendingStep: AgentStep | null
   threadSummaries: AgentThreadSummary[]
   onChatInputChange: (value: string) => void
   onCloseHistorySidebar: () => void
   onDeleteThread: (threadId: string) => void
+  onExecutePendingStep: () => void
   onSelectThread: (threadId: string) => void
   onStartNewChat: () => void
   onStopRun: () => void
   onSubmitChatMessage: () => void
   onToggleHistorySidebar: () => void
 }
+
+const MAX_RENDERED_CHAT_ITEMS = 160
 
 export function ChatPanel({
   activeThreadId,
@@ -36,10 +63,12 @@ export function ChatPanel({
   interactionItems,
   copy,
   historySidebarOpen,
+  pendingStep,
   threadSummaries,
   onChatInputChange,
   onCloseHistorySidebar,
   onDeleteThread,
+  onExecutePendingStep,
   onSelectThread,
   onStartNewChat,
   onStopRun,
@@ -47,12 +76,20 @@ export function ChatPanel({
   onToggleHistorySidebar,
 }: ChatPanelProps) {
   const chatInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const chatStreamRef = useRef<HTMLDivElement | null>(null)
+  const shouldFollowOutputRef = useRef(true)
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const chatIsEmpty = chatInput.trim().length === 0
   const isBusy = Boolean(busyTask)
   const canStopRun = busyTask?.id === 'run-agent'
   const items =
     interactionItems ?? conversation.map<InteractionStreamItem>((message) => messageToItem(message))
-  const activeStepId = isAgentStepBusyTask(busyTask) ? findLatestOpenStepId(items) : null
+  const visibleItems = useMemo(
+    () => items.slice(Math.max(0, items.length - MAX_RENDERED_CHAT_ITEMS)),
+    [items],
+  )
+  const activeStepId = isAgentStepBusyTask(busyTask) ? findLatestOpenStepId(visibleItems) : null
+  const chatInputRows = Math.min(6, Math.max(1, chatInput.split('\n').length))
   const submitChatIfNotEmpty = () => {
     if (!chatIsEmpty) {
       onSubmitChatMessage()
@@ -66,6 +103,10 @@ export function ChatPanel({
     event.preventDefault()
     submitChatIfNotEmpty()
   }
+  const handleChatInputChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    onChatInputChange(event.target.value)
+    resizeComposer(event.currentTarget)
+  }
   const handleStartNewChat = () => {
     onStartNewChat()
     chatInputRef.current?.focus()
@@ -73,6 +114,10 @@ export function ChatPanel({
   const handleHistoryNewChat = () => {
     handleStartNewChat()
     onCloseHistorySidebar()
+  }
+  const applyQuickPrompt = (prompt: string) => {
+    onChatInputChange(prompt)
+    chatInputRef.current?.focus()
   }
   const focusComposerShell = (event: MouseEvent<HTMLDivElement>) => {
     const target = event.target
@@ -82,6 +127,40 @@ export function ChatPanel({
 
     chatInputRef.current?.focus()
   }
+  const handleStreamScroll = (event: UIEvent<HTMLDivElement>) => {
+    const target = event.currentTarget
+    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight
+    const isNearBottom = distanceFromBottom < 96
+    shouldFollowOutputRef.current = isNearBottom
+    setShowScrollToBottom(!isNearBottom)
+  }
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    const stream = chatStreamRef.current
+    if (!stream) {
+      return
+    }
+
+    if (typeof stream.scrollTo === 'function') {
+      stream.scrollTo({ top: stream.scrollHeight, behavior })
+    } else {
+      stream.scrollTop = stream.scrollHeight
+    }
+    shouldFollowOutputRef.current = true
+    setShowScrollToBottom(false)
+  }
+
+  useEffect(() => {
+    const input = chatInputRef.current
+    if (input) {
+      resizeComposer(input)
+    }
+  }, [chatInput])
+
+  useEffect(() => {
+    if (shouldFollowOutputRef.current) {
+      scrollToBottom('auto')
+    }
+  }, [visibleItems.length, busyTask?.id, pendingStep?.index])
 
   return (
     <section className="chat-shell" aria-label={copy.chat}>
@@ -126,6 +205,7 @@ export function ChatPanel({
         <button
           type="button"
           className="panel-title-action"
+          aria-label={copy.newChat}
           onClick={handleStartNewChat}
           disabled={isBusy}
           title={busyTask ? copy.waitForCurrentRun : copy.newChat}
@@ -134,8 +214,34 @@ export function ChatPanel({
           {copy.newChat}
         </button>
       </div>
-      <div className="chat-stream" aria-label={copy.conversation}>
-        {items.map((item) =>
+      <div
+        className="chat-stream"
+        aria-label={copy.conversation}
+        aria-live="polite"
+        aria-relevant="additions text"
+        onScroll={handleStreamScroll}
+        ref={chatStreamRef}
+        role="log"
+      >
+        {visibleItems.length === 0 && !pendingStep ? (
+          <div className="chat-empty-state">
+            <div className="chat-empty-icon">
+              <MessageSquare size={22} aria-hidden="true" />
+            </div>
+            <strong>{copy.noMessages}</strong>
+            <div className="chat-empty-prompts">
+              {copy.quickStartPrompts.map((prompt, index) => (
+                <button type="button" key={prompt} onClick={() => applyQuickPrompt(prompt)}>
+                  <span className="chat-empty-prompt-icon" aria-hidden="true">
+                    {renderQuickPromptIcon(index)}
+                  </span>
+                  <span className="chat-empty-prompt-text">{prompt}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {visibleItems.map((item) =>
           item.type === 'step' ? (
             <AgentStepCard
               copy={copy}
@@ -148,11 +254,36 @@ export function ChatPanel({
               <span className="visually-hidden">
                 {formatConversationRole(item.message.role, copy)}
               </span>
-              <MarkdownContent className="chat-message-content" content={item.message.content} />
+              <LazyMarkdownContent className="chat-message-content" content={item.message.content} />
             </article>
           ),
         )}
+        {isBusy ? (
+          <div className="chat-run-status" role="status">
+            <LoaderCircle className="chat-run-status-spinner" size={14} />
+            <span>{busyTask?.label ?? copy.runAgentTask}</span>
+          </div>
+        ) : null}
+        {pendingStep ? (
+          <PendingActionCard
+            busyTask={busyTask}
+            copy={copy}
+            onExecutePendingStep={onExecutePendingStep}
+            pendingStep={pendingStep}
+          />
+        ) : null}
       </div>
+      {showScrollToBottom ? (
+        <button
+          type="button"
+          className="chat-scroll-bottom"
+          aria-label={copy.scrollToLatest}
+          title={copy.scrollToLatest}
+          onClick={() => scrollToBottom()}
+        >
+          <ArrowDown size={16} />
+        </button>
+      ) : null}
       <form
         className="chat-composer"
         onSubmit={(event) => {
@@ -167,9 +298,9 @@ export function ChatPanel({
               ref={chatInputRef}
               className="chat-input"
               value={chatInput}
-              onChange={(event) => onChatInputChange(event.target.value)}
+              onChange={handleChatInputChange}
               onKeyDown={handleComposerKeyDown}
-              rows={1}
+              rows={chatInputRows}
               placeholder={copy.chatPlaceholder}
             />
           </label>
@@ -203,6 +334,11 @@ export function ChatPanel({
   )
 }
 
+function resizeComposer(textarea: HTMLTextAreaElement) {
+  textarea.style.height = 'auto'
+  textarea.style.height = `${Math.min(textarea.scrollHeight, 132)}px`
+}
+
 function findLatestOpenStepId(items: readonly InteractionStreamItem[]) {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index]
@@ -233,4 +369,14 @@ function formatConversationRole(role: 'user' | 'assistant' | 'observation', copy
     return copy.observation
   }
   return copy.user
+}
+
+function renderQuickPromptIcon(index: number) {
+  if (index === 1) {
+    return <Camera size={16} strokeWidth={2} />
+  }
+  if (index === 2) {
+    return <Home size={16} strokeWidth={2} />
+  }
+  return <Settings size={16} strokeWidth={2} />
 }

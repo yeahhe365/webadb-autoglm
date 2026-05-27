@@ -1,8 +1,12 @@
 .agent-step-card {
-  background: color-mix(in srgb, var(--panel-bg) 92%, var(--subtle-bg));
-  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-bg-elevated) 38%, transparent), transparent),
+    color-mix(in srgb, var(--panel-bg) 92%, var(--subtle-bg));
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
   border-radius: 8px;
-  box-shadow: none;
+  box-shadow:
+    0 8px 24px color-mix(in srgb, var(--shadow) 48%, transparent),
+    0 1px 0 color-mix(in srgb, var(--on-primary) 18%, transparent) inset;
   display: grid;
   gap: 4px;
   justify-self: start;
@@ -13,19 +17,25 @@
 
 .agent-step-card.running {
   border-color: var(--accent-soft-border);
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    0 10px 28px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .agent-step-card.success {
   border-color: var(--status-ok-border);
+  box-shadow: inset 3px 0 0 var(--primary);
 }
 
 .agent-step-card.failed {
   border-color: var(--danger-border);
+  box-shadow: inset 3px 0 0 var(--danger);
 }
 
 .agent-step-card.review,
 .agent-step-card.takeover {
   border-color: var(--warn-border);
+  box-shadow: inset 3px 0 0 var(--warn);
 }
 
 .agent-step-header {
@@ -49,8 +59,8 @@
 
 .agent-step-action-icon {
   align-items: center;
-  background: var(--subtle-bg);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--subtle-bg) 88%, var(--panel-bg));
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
   border-radius: 6px;
   color: var(--text-secondary);
   display: inline-flex;
@@ -116,6 +126,58 @@
 
 .agent-step-summary p {
   margin: 0;
+}
+
+.agent-step-quick-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.agent-step-chip {
+  align-items: center;
+  background: color-mix(in srgb, var(--surface-muted) 74%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: 999px;
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  max-width: min(100%, 180px);
+  min-height: 22px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-step-card.running .agent-step-chip {
+  background: color-mix(in srgb, var(--accent-soft) 58%, transparent);
+  border-color: color-mix(in srgb, var(--accent-soft-border) 72%, transparent);
+  color: var(--accent-soft-text);
+}
+
+.agent-step-card.success .agent-step-chip {
+  background: color-mix(in srgb, var(--status-ok-bg) 72%, transparent);
+  border-color: color-mix(in srgb, var(--status-ok-border) 70%, transparent);
+  color: var(--status-ok-text);
+}
+
+.agent-step-card.failed .agent-step-chip {
+  background: color-mix(in srgb, var(--danger-bg) 74%, transparent);
+  border-color: color-mix(in srgb, var(--danger-border) 78%, transparent);
+  color: var(--danger);
+}
+
+.agent-step-card.review .agent-step-chip,
+.agent-step-card.takeover .agent-step-chip {
+  background: color-mix(in srgb, var(--warn-bg) 74%, transparent);
+  border-color: color-mix(in srgb, var(--warn-border) 74%, transparent);
+  color: var(--warn);
 }
 
 .agent-step-status {

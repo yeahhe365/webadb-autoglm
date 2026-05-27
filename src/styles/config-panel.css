@@ -5,7 +5,7 @@
 }
 
 .config-panel-expanded {
-  max-height: calc(100dvh - 152px);
+  max-height: calc(100dvh - 160px);
   overflow: auto;
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
@@ -27,30 +27,39 @@
 .config-panel-collapsed {
   align-items: center;
   gap: 10px;
-  padding: 10px 8px;
+  padding: 12px 8px;
 }
 
 .config-sidebar-header {
   align-items: center;
+  background: color-mix(in srgb, var(--panel-bg) 94%, transparent);
   display: flex;
   gap: 8px;
   justify-content: space-between;
+  margin: -16px -16px 0;
+  min-height: 52px;
   min-width: 0;
+  padding: 10px 12px 10px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .config-sidebar-title {
   color: var(--text);
   flex: 1 1 auto;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 900;
+  letter-spacing: 0.04em;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
 .config-sidebar-toggle {
-  border-radius: 12px;
+  border-radius: 8px;
   height: 38px;
   min-height: 38px;
   width: 38px;
@@ -59,10 +68,17 @@
 .config-panel-content,
 .config-panel-group {
   display: grid;
-  gap: 14px;
+  gap: 15px;
   min-width: 0;
 }
 
 .config-panel-group {
   scroll-margin: 14px;
+}
+
+.config-panel-collapsed .config-sidebar-header {
+  background: transparent;
+  margin: 0;
+  min-height: auto;
+  padding: 0;
 }

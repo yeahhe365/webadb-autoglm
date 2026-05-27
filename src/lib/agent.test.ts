@@ -6,10 +6,13 @@ import {
   nextAgentStepIndex,
   queueUserMessage,
   recordAgentStep,
+  recordAgentStepExecutionDuration,
   runAgentStep,
+  type AgentStep,
 } from './agent'
 import { OpenAiClientError } from './openAiErrors'
 import type { OpenAiClient } from './openAiTypes'
+import { ActionToolRegistry } from './toolRegistry'
 
 function fakeDevice(): DeviceBackend & { executed: string[] } {
   const executed: string[] = []
@@ -34,6 +37,17 @@ function fakeDevice(): DeviceBackend & { executed: string[] } {
       executed.push(action.action)
       return action.action
     }),
+    getScreenTree: vi.fn(async () => ({
+      nodes: [
+        {
+          index: 0,
+          text: 'Search',
+          className: 'android.widget.EditText',
+          clickable: true,
+          bounds: { left: 24, top: 100, right: 1056, bottom: 180 },
+        },
+      ],
+    })),
     getInstalledApps: vi.fn(async () => [
       { label: 'Gmail', packageName: 'com.google.android.gm' },
       { packageName: 'com.android.chrome' },
@@ -88,6 +102,10 @@ describe('runAgentStep', () => {
           packageName: 'com.android.chrome',
           activity: 'com.google.android.apps.chrome.Main',
         }),
+        screenTree: expect.objectContaining({
+          nodes: expect.arrayContaining([expect.objectContaining({ text: 'Search' })]),
+        }),
+        promptContext: expect.stringContaining('<screen_tree>'),
       }),
     )
   })
@@ -670,6 +688,85 @@ describe('createAgentRunner', () => {
     expect(device.executed).toEqual(['wait', 'wait'])
   })
 
+  it('returns retained run steps without screenshot image data or large prompt fields', async () => {
+    const device = fakeDevice()
+    const longModelOutput = `{"action":"tap","x":100,"y":200,"reason":"${'x'.repeat(6000)}"}`
+    const client: OpenAiClient = {
+      completeAction: vi.fn(async () => longModelOutput),
+    }
+    const runner = createAgentRunner({ device, client })
+
+    const result = await runner.run({
+      modelConfig: { baseUrl: 'https://api.example.com/v1', apiKey: 'key', model: 'm' },
+      task: 'Open app',
+      autoExecute: false,
+      maxSteps: 1,
+    })
+
+    expect(result.steps[0].promptContext).toBeUndefined()
+    expect(result.steps[0].screenshot.dataUrl).toBe('')
+    expect(result.steps[0].screenshot.bytes).toBeUndefined()
+    expect(result.steps[0].modelOutput.length).toBeLessThan(longModelOutput.length)
+    expect(result.steps[0].modelOutput).toContain('[truncated]')
+  })
+
+  it('includes action execution time in the step total duration', () => {
+    const step: AgentStep = {
+      index: 1,
+      screenshot: {
+        bytes: new Uint8Array(),
+        dataUrl: 'data:image/png;base64,abc',
+        screen: { width: 1080, height: 2400 },
+      },
+      currentApp: 'Chrome',
+      deviceState: { app: 'Chrome' },
+      modelOutput: '{"action":"tap","x":100,"y":200}',
+      action: { action: 'tap', x: 100, y: 200 } as const,
+      executionAction: { action: 'tap', x: 100, y: 200 } as const,
+      preview: 'tap (100, 200)',
+      timing: { captureMs: 1, currentAppMs: 2, modelMs: 3, parseMs: 4, totalMs: 10 },
+    }
+
+    recordAgentStepExecutionDuration(step, 15.4)
+
+    expect(step.timing.executionMs).toBe(15)
+    expect(step.timing.totalMs).toBe(25)
+
+    recordAgentStepExecutionDuration(step, 5)
+
+    expect(step.timing.executionMs).toBe(5)
+    expect(step.timing.totalMs).toBe(15)
+  })
+
+  it('returns auto-executed steps with execution time included', async () => {
+    const device = fakeDevice()
+    const registry = new ActionToolRegistry()
+    registry.register('tap', {
+      description: 'Delayed tap for timing assertions.',
+      parameters: {},
+      execute: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        return 'input tap 100 200'
+      },
+    })
+    const client: OpenAiClient = {
+      completeAction: vi.fn(async () => '{"action":"tap","x":100,"y":200}'),
+    }
+    const runner = createAgentRunner({ device, client, toolRegistry: registry })
+
+    const result = await runner.run({
+      modelConfig: { baseUrl: 'https://api.example.com/v1', apiKey: 'key', model: 'm' },
+      task: 'Open app',
+      autoExecute: true,
+      maxSteps: 1,
+    })
+
+    expect(result.steps[0].timing.executionMs).toBeGreaterThan(0)
+    expect(result.steps[0].timing.totalMs).toBeGreaterThanOrEqual(
+      result.steps[0].timing.executionMs ?? 0,
+    )
+  })
+
   it('auto-executes coordinates mapped back to the device screen', async () => {
     const device = fakePreprocessedDevice()
     const client: OpenAiClient = {
@@ -685,6 +782,48 @@ describe('createAgentRunner', () => {
     })
 
     expect(device.executedActions).toEqual([{ action: 'tap', x: 500, y: 1000 }])
+  })
+
+  it('passes runtime action signatures into context and records the executed tool name', async () => {
+    const device = fakeDevice()
+    const session = createAgentSession('Open app')
+    const client: OpenAiClient = {
+      completeAction: vi.fn(async () => '{"action":"tap","x":100,"y":200}'),
+    }
+    const runner = createAgentRunner({ device, client })
+
+    const result = await runner.run({
+      modelConfig: { baseUrl: 'https://api.example.com/v1', apiKey: 'key', model: 'm' },
+      task: 'Open app',
+      autoExecute: true,
+      maxSteps: 1,
+      session,
+    })
+
+    expect(result.status).toBe('max_steps')
+    expect(client.completeAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionTools: expect.objectContaining({
+          tap: expect.objectContaining({
+            description: expect.stringContaining('Tap'),
+          }),
+        }),
+        promptContext: expect.stringContaining('<available_action_tools>'),
+      }),
+    )
+    expect(vi.mocked(client.completeAction).mock.calls[0][0].promptContext).toContain(
+      'tap(x:number required, y:number required',
+    )
+    expect(session.turns[0].toolName).toBe('tap')
+    expect(session.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'action_execution',
+          toolName: 'tap',
+        }),
+      ]),
+    )
+    expect(result.steps[0].toolName).toBe('tap')
   })
 
   it('waits for the executed-action callback before starting the next step', async () => {
@@ -757,6 +896,56 @@ describe('createAgentRunner', () => {
         content: 'input tap 100 200',
       }),
     )
+  })
+
+  it('does not remember note actions by default', () => {
+    const session = createAgentSession('Open app')
+    const onMemoryItem = vi.fn()
+    const step: AgentStep = {
+      index: 1,
+      screenshot: {
+        bytes: new Uint8Array(),
+        dataUrl: 'data:image/png;base64,abc',
+        screen: { width: 1080, height: 2400 },
+      },
+      currentApp: 'Chrome',
+      deviceState: { app: 'Chrome' },
+      modelOutput: '{"action":"note","message":"Use the work account."}',
+      action: { action: 'note', message: 'Use the work account.' },
+      executionAction: { action: 'note', message: 'Use the work account.' },
+      preview: 'note: Use the work account.',
+      timing: { captureMs: 1, currentAppMs: 2, modelMs: 3, parseMs: 4, totalMs: 10 },
+    }
+
+    recordAgentStep(session, step, 'note', true, { onMemoryItem })
+
+    expect(session.memory).toEqual([])
+    expect(onMemoryItem).not.toHaveBeenCalled()
+  })
+
+  it('remembers note actions only when memory is enabled', () => {
+    const session = createAgentSession('Open app')
+    const onMemoryItem = vi.fn()
+    const step: AgentStep = {
+      index: 1,
+      screenshot: {
+        bytes: new Uint8Array(),
+        dataUrl: 'data:image/png;base64,abc',
+        screen: { width: 1080, height: 2400 },
+      },
+      currentApp: 'Chrome',
+      deviceState: { app: 'Chrome' },
+      modelOutput: '{"action":"note","message":"Use the work account."}',
+      action: { action: 'note', message: 'Use the work account.' },
+      executionAction: { action: 'note', message: 'Use the work account.' },
+      preview: 'note: Use the work account.',
+      timing: { captureMs: 1, currentAppMs: 2, modelMs: 3, parseMs: 4, totalMs: 10 },
+    }
+
+    recordAgentStep(session, step, 'note', true, { memoryEnabled: true, onMemoryItem })
+
+    expect(session.memory).toEqual(['Use the work account.'])
+    expect(onMemoryItem).toHaveBeenCalledWith('Use the work account.')
   })
 
   it('keeps device state, visits, and action outcomes in shared run state', async () => {

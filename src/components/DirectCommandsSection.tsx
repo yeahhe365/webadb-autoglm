@@ -1,12 +1,8 @@
 import {
-  ArrowLeft,
-  CornerDownLeft,
-  Home,
-  Keyboard,
   MousePointerClick,
-  MoveRight,
+  Move,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   DEFAULT_DIRECT_SWIPE_FROM_X,
   DEFAULT_DIRECT_SWIPE_FROM_Y,
@@ -22,18 +18,22 @@ import type { BusyTask } from '../lib/busyTask'
 
 export type DirectCommandsSectionProps = {
   busyTask: BusyTask | null
+  className?: string
   connected: boolean
   copy: AppCopy
   onRunDirectAction: (action: AgentAction) => void
   sectionId?: string
+  summary?: ReactNode
 }
 
 export function DirectCommandsSection({
   busyTask,
+  className = 'compact-section',
   connected,
   copy,
   onRunDirectAction,
   sectionId,
+  summary,
 }: DirectCommandsSectionProps) {
   const [tapX, setTapX] = useState(DEFAULT_DIRECT_TAP_X)
   const [tapY, setTapY] = useState(DEFAULT_DIRECT_TAP_Y)
@@ -41,14 +41,13 @@ export function DirectCommandsSection({
   const [swipeFromY, setSwipeFromY] = useState(DEFAULT_DIRECT_SWIPE_FROM_Y)
   const [swipeToX, setSwipeToX] = useState(DEFAULT_DIRECT_SWIPE_TO_X)
   const [swipeToY, setSwipeToY] = useState(DEFAULT_DIRECT_SWIPE_TO_Y)
-  const [directText, setDirectText] = useState('')
 
   const isBusy = Boolean(busyTask)
   const directDisabled = isBusy || !connected
 
   return (
-    <details className="compact-section" id={sectionId}>
-      <summary>{copy.directCommands}</summary>
+    <details className={className} id={sectionId}>
+      <summary>{summary ?? copy.directCommands}</summary>
       <section className="direct-command-panel" aria-label={copy.directCommands}>
         <div className="direct-command-grid two">
           <label>
@@ -126,52 +125,9 @@ export function DirectCommandsSection({
           }
           disabled={directDisabled}
         >
-          <MoveRight size={16} />
+          <Move size={16} />
           {copy.runSwipe}
         </button>
-        <label>
-          {copy.directText}
-          <input
-            type="text"
-            value={directText}
-            onChange={(event) => setDirectText(event.target.value)}
-          />
-        </label>
-        <button
-          type="button"
-          className="wide"
-          onClick={() => onRunDirectAction({ action: 'input_text', text: directText })}
-          disabled={directDisabled || !directText.trim()}
-        >
-          <Keyboard size={16} />
-          {copy.runType}
-        </button>
-        <div className="button-row">
-          <button
-            type="button"
-            onClick={() => onRunDirectAction({ action: 'back' })}
-            disabled={directDisabled}
-          >
-            <ArrowLeft size={16} />
-            {copy.runBack}
-          </button>
-          <button
-            type="button"
-            onClick={() => onRunDirectAction({ action: 'home' })}
-            disabled={directDisabled}
-          >
-            <Home size={16} />
-            {copy.runHome}
-          </button>
-          <button
-            type="button"
-            onClick={() => onRunDirectAction({ action: 'key', key: 'ENTER' })}
-            disabled={directDisabled}
-          >
-            <CornerDownLeft size={16} />
-            {copy.runEnter}
-          </button>
-        </div>
       </section>
     </details>
   )

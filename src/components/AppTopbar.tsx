@@ -1,6 +1,7 @@
-import { BookOpen, ScanEye, Settings as SettingsIcon, Usb } from 'lucide-react'
+import { AppWindow, BookOpen, Settings as SettingsIcon, Usb } from 'lucide-react'
 import type { AppCopy } from '../lib/appCopy'
-import { isWebUsbSupported } from '../adapters/webAdbBackend'
+import { isWebUsbSupported } from '../adapters/webUsbSupport'
+import { formatCurrentAppLabel } from './deviceDisplay'
 
 type AppTopbarProps = {
   copy: AppCopy
@@ -22,6 +23,7 @@ export function AppTopbar({
   const tutorialButtonClassName = isTutorialOpen
     ? 'topbar-button tutorial-button active'
     : 'topbar-button tutorial-button'
+  const currentAppLabel = formatCurrentAppLabel(currentApp, copy)
 
   return (
     <header className="topbar">
@@ -37,11 +39,17 @@ export function AppTopbar({
         <div className="status-strip">
           <span className={webUsbSupported ? 'status ok' : 'status warn'}>
             <Usb size={16} />
-            WebUSB {webUsbSupported ? copy.webUsbReady : copy.webUsbMissing}
+            <span className="status-label">
+              <span className="status-prefix">WebUSB </span>
+              {webUsbSupported ? copy.webUsbReady : copy.webUsbMissing}
+            </span>
           </span>
-          <span className="status">
-            <ScanEye size={16} />
-            {copy.currentApp}: {currentApp}
+          <span className="status current-app-status" title={`${copy.currentApp}: ${currentAppLabel}`}>
+            <AppWindow size={16} />
+            <span className="status-label">
+              <span className="status-prefix">{copy.currentApp}: </span>
+              {currentAppLabel}
+            </span>
           </span>
         </div>
         <button

@@ -10,4 +10,6 @@ export type BusyTaskId =
 
 export type BusyTask = {
   id: BusyTaskId
+  label: string
+  startedAt: number
 }

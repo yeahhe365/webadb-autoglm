@@ -33,13 +33,16 @@ describe('settings persistence', () => {
         baseUrl: 'https://api.example.com/v1',
         apiKey: 'sk-test',
         model: 'custom-model',
+        reasoningEffort: 'high',
       },
       maxSteps: 12,
+      memoryEnabled: true,
       preferAdbKeyboard: true,
       confirmSensitiveActions: false,
       unrestrictedMode: true,
       screenBlackoutDuringAutoControl: true,
       streamResponses: true,
+      disabledActionTools: ['tap', 'open_url'],
       actionSettleMs: 350,
       doubleTapIntervalMs: 75,
       keyboardStepMs: 450,
@@ -79,6 +82,7 @@ describe('settings persistence', () => {
         baseUrl: 'https://api.example.com/v1',
         apiKey: 'sk-test',
         model: 'gpt-5.5',
+        reasoningEffort: 'medium',
       },
     }
 
@@ -93,10 +97,16 @@ describe('settings persistence', () => {
         memoryStorage({
           'webdroid-agent-settings': JSON.stringify({
             ...DEFAULT_SETTINGS,
+            modelConfig: {
+              ...DEFAULT_SETTINGS.modelConfig,
+              reasoningEffort: 'deep',
+            },
             actionProtocol: 'invalid-protocol',
             promptMode: 'invalid-mode',
+            memoryEnabled: 'yes',
             screenBlackoutDuringAutoControl: 'yes',
             streamResponses: 'yes',
+            disabledActionTools: ['tap', 'not-a-real-tool', 'tap'],
             actionSettleMs: -1,
             doubleTapIntervalMs: 10000,
             keyboardStepMs: Number.NaN,
@@ -105,7 +115,10 @@ describe('settings persistence', () => {
           }),
         }),
       ),
-    ).toEqual(DEFAULT_SETTINGS)
+    ).toEqual({
+      ...DEFAULT_SETTINGS,
+      disabledActionTools: ['tap'],
+    })
   })
 
   it('drops the removed AutoGLM native prompt mode from persisted settings', () => {
@@ -119,6 +132,30 @@ describe('settings persistence', () => {
     )
 
     expect(loaded).not.toHaveProperty('promptMode')
+  })
+
+  it('keeps large max step values but still enforces the minimum', () => {
+    expect(
+      loadSettings(
+        memoryStorage({
+          'webdroid-agent-settings': JSON.stringify({
+            ...DEFAULT_SETTINGS,
+            maxSteps: 500,
+          }),
+        }),
+      ).maxSteps,
+    ).toBe(500)
+
+    expect(
+      loadSettings(
+        memoryStorage({
+          'webdroid-agent-settings': JSON.stringify({
+            ...DEFAULT_SETTINGS,
+            maxSteps: 0,
+          }),
+        }),
+      ).maxSteps,
+    ).toBe(1)
   })
 
   it('keeps the previous WebADB AutoGLM settings key as a migration fallback', () => {

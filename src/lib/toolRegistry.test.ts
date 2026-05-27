@@ -40,8 +40,24 @@ describe('ActionToolRegistry', () => {
     expect(signatures.type_secret.parameters.secretId).toEqual(
       expect.objectContaining({ required: true, type: 'string' }),
     )
+    expect(signatures.open_url.parameters.url).toEqual(
+      expect.objectContaining({ required: true, type: 'string' }),
+    )
+    expect(signatures.set_clipboard.parameters.text).toEqual(
+      expect.objectContaining({ required: true, type: 'string' }),
+    )
+    expect(signatures.paste.parameters).toEqual({})
     expect(signatures.custom_tool.parameters.tool).toEqual(
       expect.objectContaining({ required: true, type: 'string' }),
+    )
+    expect(signatures.sequence.parameters.actions).toEqual(
+      expect.objectContaining({ required: true, type: 'list' }),
+    )
+    expect(signatures.repeat.parameters.count).toEqual(
+      expect.objectContaining({ required: true, type: 'number' }),
+    )
+    expect(signatures.repeat.parameters.actionToRepeat).toEqual(
+      expect.objectContaining({ required: true, type: 'object' }),
     )
     expect(signatures.wait.parameters.duration).toEqual(
       expect.objectContaining({ required: false, type: 'number', default: 1.0 }),
@@ -71,6 +87,8 @@ describe('ActionToolRegistry', () => {
     const device = fakeDevice()
     const registry = createDefaultActionToolRegistry(['tap'])
 
+    expect(registry.getSignatures()).not.toHaveProperty('tap')
+
     const result = await registry.execute(
       { action: 'tap', x: 100, y: 200 },
       { device },
@@ -78,6 +96,76 @@ describe('ActionToolRegistry', () => {
 
     expect(result.success).toBe(false)
     expect(result.summary).toContain('disabled')
+    expect(device.executed).toEqual([])
+  })
+
+  it('executes sequence actions through the same action registry', async () => {
+    const device = fakeDevice()
+    const registry = createDefaultActionToolRegistry()
+
+    const result = await registry.execute(
+      {
+        action: 'sequence',
+        actions: [
+          { action: 'tap', x: 100, y: 200 },
+          { action: 'input_text', text: 'hello' },
+        ],
+      },
+      { device },
+    )
+
+    expect(result.success).toBe(true)
+    expect(result.toolName).toBe('sequence')
+    expect(result.summary).toContain('sequence completed 2 action(s).')
+    expect(result.summary).toContain('action 1/2 tap: tap executed')
+    expect(result.summary).toContain('action 2/2 input_text: input_text executed')
+    expect(device.executed).toEqual(['tap', 'input_text'])
+  })
+
+  it('executes repeat actions the requested number of times', async () => {
+    const device = fakeDevice()
+    const registry = createDefaultActionToolRegistry()
+
+    const result = await registry.execute(
+      {
+        action: 'repeat',
+        count: 3,
+        actionToRepeat: { action: 'back' },
+      },
+      { device },
+    )
+
+    expect(result.success).toBe(true)
+    expect(result.toolName).toBe('repeat')
+    expect(result.summary).toContain('repeat completed 3 action(s).')
+    expect(result.summary).toContain('repeat 3/3 back: back executed')
+    expect(device.executed).toEqual(['back', 'back', 'back'])
+  })
+
+  it('stops composite actions when a child action fails safety checks', async () => {
+    const device = fakeDevice()
+    const registry = createDefaultActionToolRegistry()
+
+    const result = await registry.execute(
+      {
+        action: 'sequence',
+        actions: [
+          { action: 'tap', x: 100, y: 200 },
+          { action: 'tap', x: 300, y: 400 },
+        ],
+      },
+      { device, safetyContext: { task: 'Pay now and place order' } },
+    )
+
+    expect(result).toEqual({
+      success: false,
+      safetyDecision: 'block',
+      summary: [
+        'sequence stopped at action 1/2.',
+        'action 1/2 tap: Safety policy blocked a payment, checkout, order, or money-transfer action.',
+      ].join('\n'),
+      toolName: 'sequence',
+    })
     expect(device.executed).toEqual([])
   })
 
@@ -194,6 +282,8 @@ describe('ActionToolRegistry', () => {
       text: 'super-secret',
       clear: true,
       reason: undefined,
+    }, {
+      signal: undefined,
     })
     expect(result.summary).not.toContain('super-secret')
   })

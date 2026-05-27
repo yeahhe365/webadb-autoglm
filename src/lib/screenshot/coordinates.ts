@@ -1,5 +1,5 @@
 import type { DeviceScreenshot } from '../../adapters/deviceTypes'
-import type { AgentAction, ScreenSize } from '../actionTypes'
+import type { AgentAction, ExecutableAtomicAction, ScreenSize } from '../actionTypes'
 
 export const MODEL_SCREENSHOT_MAX_SIDE = 1536
 export const MODEL_SCREENSHOT_MIME_TYPE = 'image/jpeg'
@@ -76,6 +76,16 @@ export function buildScreenshotContext({
 }
 
 export function mapActionCoordinates(
+  action: ExecutableAtomicAction,
+  fromScreen: ScreenSize,
+  toScreen: ScreenSize,
+): ExecutableAtomicAction
+export function mapActionCoordinates(
+  action: AgentAction,
+  fromScreen: ScreenSize,
+  toScreen: ScreenSize,
+): AgentAction
+export function mapActionCoordinates(
   action: AgentAction,
   fromScreen: ScreenSize,
   toScreen: ScreenSize,
@@ -104,6 +114,18 @@ export function mapActionCoordinates(
         toY: to.y,
       }
     }
+    case 'sequence':
+      return {
+        ...action,
+        actions: action.actions.map((childAction) =>
+          mapActionCoordinates(childAction, fromScreen, toScreen),
+        ),
+      }
+    case 'repeat':
+      return {
+        ...action,
+        actionToRepeat: mapActionCoordinates(action.actionToRepeat, fromScreen, toScreen),
+      }
     default:
       return action
   }

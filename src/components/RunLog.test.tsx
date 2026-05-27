@@ -1,14 +1,26 @@
 // @vitest-environment jsdom
+/// <reference types="node" />
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RunLog, type LogEntry } from './RunLog'
+
+const screenshotLightboxCss = readFileSync('src/styles/screenshot-lightbox.css', 'utf8')
 
 afterEach(() => {
   cleanup()
 })
 
 describe('RunLog', () => {
+  it('renders a structured empty state when there are no events', () => {
+    render(<RunLog logs={[]} onClear={vi.fn()} />)
+
+    expect(screen.getByText('No events yet')).toBeTruthy()
+    expect(document.querySelector('.log-empty-state')).toBeTruthy()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Clear' }).disabled).toBe(true)
+  })
+
   it('renders saved screenshot thumbnails and opens them enlarged', () => {
     const logs: LogEntry[] = [
       {
@@ -67,6 +79,50 @@ describe('RunLog', () => {
 
     fireEvent.wheel(expanded, { deltaY: 100 })
     expect(expanded.style.height).toBe('100%')
+  })
+
+  it('zooms and resets the expanded screenshot with visible controls', () => {
+    const logs: LogEntry[] = [
+      {
+        id: 1,
+        time: '10:30:00',
+        tone: 'info',
+        title: 'Step 1: tap (100, 200)',
+        screenshot: {
+          dataUrl: 'data:image/png;base64,abc123',
+          screen: { width: 955, height: 2048 },
+        },
+      },
+    ]
+
+    render(<RunLog logs={logs} onClear={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /open screenshot/i }))
+
+    const expanded = screen.getByAltText('Expanded screenshot for Step 1: tap (100, 200)')
+
+    expect(screen.getByLabelText('Screenshot zoom controls')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in screenshot' }))
+    expect(expanded.style.height).toBe('125%')
+    expect(screen.getByText('125%')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out screenshot' }))
+    expect(expanded.style.height).toBe('100%')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out screenshot' }))
+    expect(expanded.style.height).toBe('75%')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset screenshot zoom' }))
+    expect(expanded.style.height).toBe('100%')
+  })
+
+  it('wraps screenshot lightbox controls on very narrow screens', () => {
+    expect(screenshotLightboxCss).toContain('@media (max-width: 380px)')
+    expect(screenshotLightboxCss).toMatch(
+      /\.screenshot-modal-header\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    )
+    expect(screenshotLightboxCss).toMatch(
+      /\.screenshot-modal-toolbar\s*\{[\s\S]*justify-content:\s*space-between/,
+    )
   })
 
   it('places screenshot thumbnails in a right-side media area', () => {

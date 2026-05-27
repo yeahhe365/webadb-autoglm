@@ -58,6 +58,12 @@ export function buildInputCommandSequence(
       sequence.push(['input', 'text', escapeInputText(action.text)])
       return sequence
     }
+    case 'open_url':
+      return [['am', 'start', '-a', 'android.intent.action.VIEW', '-d', action.url]]
+    case 'set_clipboard':
+      return []
+    case 'paste':
+      return [['input', 'keyevent', 'KEYCODE_PASTE']]
     case 'key':
       return [['input', 'keyevent', keyToAndroidKeyCode(action.key)]]
     case 'back':
@@ -90,6 +96,10 @@ export function buildInputCommandSequence(
       throw new DeviceBackendError('type_secret must be resolved by the action tool registry.')
     case 'custom_tool':
       throw new DeviceBackendError('custom_tool does not execute on the Android device.')
+    case 'sequence':
+      throw new DeviceBackendError('sequence must be expanded by the action tool registry.')
+    case 'repeat':
+      throw new DeviceBackendError('repeat must be expanded by the action tool registry.')
     case 'note':
     case 'take_over':
     case 'wait':

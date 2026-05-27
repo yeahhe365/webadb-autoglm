@@ -16,6 +16,8 @@ type ChatHistorySidebarProps = {
   threadSummaries: AgentThreadSummary[]
 }
 
+const MAX_RENDERED_HISTORY_ITEMS = 200
+
 export function ChatHistorySidebar({
   activeThreadId,
   busyTask,
@@ -30,21 +32,29 @@ export function ChatHistorySidebar({
   const [query, setQuery] = useState('')
   const isBusy = Boolean(busyTask)
   const shouldRenderHistoryContent = isOpen
-  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const trimmedQuery = query.trim()
   const filteredSummaries = useMemo(() => {
     if (!shouldRenderHistoryContent) {
       return []
     }
+    const normalizedQuery = query.trim().toLocaleLowerCase()
     if (!normalizedQuery) {
-      return threadSummaries
+      return threadSummaries.slice(0, MAX_RENDERED_HISTORY_ITEMS)
     }
-    return threadSummaries.filter((summary) => {
-      return [summary.title, summary.task]
-        .filter(Boolean)
-        .some((value) => value.toLocaleLowerCase().includes(normalizedQuery))
-    })
-  }, [normalizedQuery, shouldRenderHistoryContent, threadSummaries])
-  const emptyLabel = threadSummaries.length === 0 ? copy.historyEmpty : copy.historyNoMatches
+    return threadSummaries
+      .filter((summary) => {
+        return [summary.title, summary.task]
+          .filter(Boolean)
+          .some((value) => value.toLocaleLowerCase().includes(normalizedQuery))
+      })
+      .slice(0, MAX_RENDERED_HISTORY_ITEMS)
+  }, [query, shouldRenderHistoryContent, threadSummaries])
+  const emptyLabel =
+    threadSummaries.length === 0
+      ? copy.historyEmpty
+      : trimmedQuery
+        ? copy.historyNoMatchesForQuery(trimmedQuery)
+        : copy.historyNoMatches
 
   return (
     <aside
@@ -65,6 +75,7 @@ export function ChatHistorySidebar({
           <PanelLeftClose size={20} strokeWidth={2} />
         </button>
         <span>{copy.history}</span>
+        <small className="chat-history-count">{threadSummaries.length}</small>
       </div>
 
       {shouldRenderHistoryContent ? (
@@ -105,7 +116,19 @@ export function ChatHistorySidebar({
 
           <div className="chat-history-list">
             {filteredSummaries.length === 0 ? (
-              <p className="chat-history-empty">{emptyLabel}</p>
+              <div className="chat-history-empty">
+                <SquarePen size={20} strokeWidth={2} aria-hidden="true" />
+                <p>{emptyLabel}</p>
+                {threadSummaries.length > 0 && trimmedQuery ? (
+                  <button
+                    type="button"
+                    className="chat-history-empty-action"
+                    onClick={() => setQuery('')}
+                  >
+                    {copy.historySearchClear}
+                  </button>
+                ) : null}
+              </div>
             ) : (
               <section aria-label={copy.recentChats}>
                 <h3>{copy.recentChats}</h3>
@@ -126,9 +149,15 @@ export function ChatHistorySidebar({
                           onClick={() => onSelectThread(summary.id)}
                           title={isBusy ? copy.waitForCurrentRun : summary.title}
                         >
-                          <span className="chat-history-item-title">{summary.title}</span>
-                          <span className="chat-history-item-meta">
-                            {formatHistoryTimestamp(summary.updatedAt)}
+                          <span
+                            className={`chat-history-status-dot status-${summary.status}`}
+                            aria-hidden="true"
+                          />
+                          <span className="chat-history-item-text">
+                            <span className="chat-history-item-title">{summary.title}</span>
+                            <span className="chat-history-item-meta">
+                              {formatHistoryTimestamp(summary.updatedAt)}
+                            </span>
                           </span>
                         </button>
                         <button

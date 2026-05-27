@@ -12,22 +12,69 @@
   font-size: 13px;
 }
 
-.search-field > span:last-child {
-  align-items: center;
+.search-field {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  position: relative;
+  gap: 7px;
+  min-width: 0;
+  width: 100%;
 }
 
-.search-field svg {
+.search-field > span:last-child {
+  align-items: center;
+  display: block;
+  min-width: 0;
+  position: relative;
+  width: 100%;
+}
+
+.search-field .search-icon {
   color: var(--text-soft);
   left: 10px;
   pointer-events: none;
   position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .search-field input {
   padding-left: 32px;
+  padding-right: 38px;
+}
+
+.search-clear-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--text-soft);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0;
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+}
+
+.search-clear-button:hover {
+  background: var(--button-bg-hover);
+  color: var(--text);
+}
+
+.search-clear-button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.installed-app-empty {
+  background: var(--surface-muted);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  padding: 10px;
 }
 
 .installed-app-list {
@@ -79,4 +126,16 @@
 .muted.compact {
   font-size: 12px;
   margin: 0;
+}
+
+@media (max-width: 520px) {
+  .installed-app-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .installed-app-row button {
+    justify-self: stretch;
+    width: 100%;
+  }
 }

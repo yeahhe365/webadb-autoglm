@@ -1,18 +1,38 @@
-import type { DeviceState, InstalledApp } from '../adapters/deviceTypes'
+import type { DeviceScreenTree, DeviceState, InstalledApp } from '../adapters/deviceTypes'
+import { formatScreenTreeForPrompt } from '../adapters/uiAutomator'
 import type { ScreenSize } from './actionTypes'
 import {
   addThreadEvent,
+  appendThreadContextSummary,
   type AgentThread,
   type AgentTurn,
 } from './agentThread'
 import type { AgentHistoryItem } from './openAiTypes'
 import type { CustomToolDescriptor, SecretDescriptor } from './agentResources'
+import type { ActionToolParameter, ActionToolSignature } from './toolRegistry'
+import {
+  truncateOptionalRetainedText,
+  truncateRetainedText,
+} from './textRetention'
 import {
   buildPromptScreenInfo,
   CANONICAL_COORDINATE_INSTRUCTION,
   formatInstalledAppsForPrompt,
   formatPromptHistoryItem,
 } from './promptContextFormatting'
+
+const COMPACTED_TURN_EXECUTION_RESULT_MAX_LENGTH = 4000
+const CONTEXT_SUMMARY_MAX_LENGTH = 16000
+const APP_CARD_PROMPT_MAX_LENGTH = 5000
+const CUSTOM_TOOL_DESCRIPTION_MAX_LENGTH = 600
+const PENDING_USER_MESSAGE_MAX_LENGTH = 1200
+const PROMPT_HISTORY_RESULT_MAX_LENGTH = 1200
+const SHARED_STATE_RESULT_MAX_LENGTH = 360
+const SHARED_STATE_RECENT_TURNS = 5
+const TASK_CONTEXT_MAX_LENGTH = 2000
+const TASK_STATE_MEMORY_ITEM_MAX_LENGTH = 400
+const TASK_STATE_MEMORY_ITEMS = 8
+const TASK_STATE_VISITED_APP_LIMIT = 8
 
 export type BuildAgentPromptContextInput = {
   thread?: AgentThread
@@ -26,8 +46,12 @@ export type BuildAgentPromptContextInput = {
   appCard?: string
   customTools?: readonly CustomToolDescriptor[]
   installedApps?: readonly InstalledApp[]
+  memoryEnabled?: boolean
+  memoryItems?: readonly string[]
+  actionTools?: Record<string, ActionToolSignature>
   maxRecentTurns?: number
   pendingUserMessages?: readonly string[]
+  screenTree?: DeviceScreenTree
   secrets?: readonly SecretDescriptor[]
 }
 
@@ -49,8 +73,12 @@ export function buildAgentPromptContext({
   appCard,
   customTools,
   installedApps,
+  memoryEnabled = false,
+  memoryItems,
+  actionTools,
   maxRecentTurns = 12,
   pendingUserMessages,
+  screenTree,
   secrets,
 }: BuildAgentPromptContextInput): BuiltAgentPromptContext {
   const history = thread
@@ -59,13 +87,35 @@ export function buildAgentPromptContext({
   const screenInfo = buildPromptScreenInfo({ currentApp, deviceScreen, deviceState, screen })
 
   const lines = [
-    `Task: ${task}`,
-    latestUserMessage ? `Latest user message: ${latestUserMessage}` : null,
+    `Task: ${truncatePromptContextText(task, TASK_CONTEXT_MAX_LENGTH)}`,
+    latestUserMessage
+      ? `Latest user message: ${truncatePromptContextText(
+          latestUserMessage,
+          TASK_CONTEXT_MAX_LENGTH,
+        )}`
+      : null,
     formatPendingUserMessages(pendingUserMessages),
+    formatTaskState({
+      thread,
+      task,
+      latestUserMessage,
+      currentApp,
+      deviceState,
+      memoryEnabled,
+      memoryItems,
+    }),
+    formatSharedState({
+      thread,
+      pendingUserMessages,
+    }),
     thread?.contextSummary ? `<context_summary>\n${thread.contextSummary}\n</context_summary>` : null,
     thread ? formatRecentActionErrors(thread) : null,
     `Screen Info: ${screenInfo}`,
-    appCard ? `<app_card>\n${appCard}\n</app_card>` : null,
+    formatScreenTreeForPrompt(screenTree),
+    appCard
+      ? `<app_card>\n${truncatePromptContextText(appCard, APP_CARD_PROMPT_MAX_LENGTH)}\n</app_card>`
+      : null,
+    formatActionToolsForPrompt(actionTools),
     formatCustomToolsForPrompt(customTools),
     formatSecretsForPrompt(secrets),
     formatInstalledAppsForPrompt(
@@ -99,9 +149,53 @@ function formatCustomToolsForPrompt(customTools?: readonly CustomToolDescriptor[
 
   return [
     '<available_custom_tools>',
-    ...tools.map((tool) => `${tool.name}: ${tool.description}`),
+    ...tools.map(
+      (tool) =>
+        `${tool.name}: ${truncatePromptContextText(
+          tool.description,
+          CUSTOM_TOOL_DESCRIPTION_MAX_LENGTH,
+        )}`,
+    ),
     '</available_custom_tools>',
   ].join('\n')
+}
+
+function formatActionToolsForPrompt(actionTools?: Record<string, ActionToolSignature>) {
+  const tools = Object.entries(actionTools ?? {})
+    .filter(([name, tool]) => name.trim() && tool.description.trim())
+    .sort(([left], [right]) => left.localeCompare(right))
+  if (tools.length === 0) {
+    return null
+  }
+
+  return [
+    '<available_action_tools>',
+    'Choose only one listed action tool unless using sequence/repeat with listed child actions.',
+    ...tools.map(
+      ([name, tool]) =>
+        `${name}(${formatActionToolParameters(tool.parameters)}): ${truncatePromptContextText(
+          tool.description,
+          CUSTOM_TOOL_DESCRIPTION_MAX_LENGTH,
+        )}`,
+    ),
+    '</available_action_tools>',
+  ].join('\n')
+}
+
+function formatActionToolParameters(parameters: Record<string, ActionToolParameter>) {
+  const entries = Object.entries(parameters)
+  if (entries.length === 0) {
+    return ''
+  }
+
+  return entries
+    .map(([name, parameter]) => {
+      const required = parameter.required === false ? 'optional' : 'required'
+      const defaultValue =
+        parameter.default === undefined ? '' : ` default=${JSON.stringify(parameter.default)}`
+      return `${name}:${parameter.type} ${required}${defaultValue}`
+    })
+    .join(', ')
 }
 
 function formatSecretsForPrompt(secrets?: readonly SecretDescriptor[]) {
@@ -142,12 +236,23 @@ export function compactThreadContext(
   }
 
   const summary = turnsToCompact.map(formatTurnSummary).join('\n')
-  thread.contextSummary = [thread.contextSummary, summary].filter(Boolean).join('\n')
-  thread.memory = thread.contextSummary ? [thread.contextSummary] : []
+  appendThreadContextSummary(
+    thread,
+    summary,
+    {
+      maxLength: CONTEXT_SUMMARY_MAX_LENGTH,
+      now: options.now,
+    },
+  )
   thread.contextCompactedThroughStep = turnsToCompact.at(-1)?.index ?? thread.contextCompactedThroughStep
   for (const turn of turnsToCompact) {
     turn.compacted = true
     turn.promptContext = ''
+    turn.modelOutput = ''
+    turn.executionResult = truncateOptionalRetainedText(
+      turn.executionResult,
+      COMPACTED_TURN_EXECUTION_RESULT_MAX_LENGTH,
+    )
   }
   addThreadEvent(
     thread,
@@ -167,7 +272,10 @@ function turnToHistoryItem(turn: AgentTurn): AgentHistoryItem {
     step: turn.index,
     currentApp: turn.deviceSnapshot.currentApp,
     actionPreview: turn.preview,
-    executionResult: turn.executionResult,
+    executionResult: truncateOptionalRetainedText(
+      turn.executionResult,
+      PROMPT_HISTORY_RESULT_MAX_LENGTH,
+    ),
   }
 }
 
@@ -193,7 +301,9 @@ function formatRecentActionErrors(thread: AgentThread) {
       [
         `- Step ${turn.index}`,
         `action=${turn.preview}`,
-        turn.executionResult ? `feedback=${turn.executionResult}` : null,
+        turn.executionResult
+          ? `feedback=${truncateRetainedText(turn.executionResult, PROMPT_HISTORY_RESULT_MAX_LENGTH)}`
+          : null,
       ]
         .filter(Boolean)
         .join(' | '),
@@ -210,7 +320,268 @@ function formatPendingUserMessages(messages?: readonly string[]) {
 
   return [
     '<pending_user_messages>',
-    ...pendingMessages.map((message) => `- ${message}`),
+    ...pendingMessages.map(
+      (message) => `- ${truncatePromptContextText(message, PENDING_USER_MESSAGE_MAX_LENGTH)}`,
+    ),
     '</pending_user_messages>',
   ].join('\n')
+}
+
+function formatSharedState({
+  thread,
+  pendingUserMessages,
+}: {
+  thread?: AgentThread
+  pendingUserMessages?: readonly string[]
+}) {
+  if (!thread) {
+    return null
+  }
+
+  const completedTurns = thread.turns.filter(isCompletedTurn)
+  const failedTurns = completedTurns.filter(
+    (turn) => turn.status === 'failed' || turn.success === false,
+  )
+  const recentTurns = completedTurns.slice(-SHARED_STATE_RECENT_TURNS)
+  const pendingMessageCount =
+    pendingUserMessages?.filter((message) => message.trim()).length ??
+    thread.pendingUserMessages.length
+  const lastCompletedStep = completedTurns.at(-1)?.index ?? thread.stepNumber
+  const lines = [
+    '<shared_state>',
+    `Status: ${thread.status}`,
+    `Last completed step: ${lastCompletedStep}`,
+    `Completed turns: ${completedTurns.length}`,
+    failedTurns.length > 0 ? `Failed turns: ${failedTurns.length}` : null,
+    thread.contextCompactedThroughStep > 0
+      ? `Context compacted through step: ${thread.contextCompactedThroughStep}`
+      : null,
+    pendingMessageCount > 0 ? `Pending user messages: ${pendingMessageCount}` : null,
+    thread.progressSummary ? `Progress summary: ${sanitizeTaskStateLine(thread.progressSummary)}` : null,
+    formatOutcomeStreak(thread.actionOutcomes),
+    recentTurns.length > 0
+      ? [
+          'Recent tool results:',
+          ...recentTurns.map((turn) => formatSharedStateTurn(turn)),
+        ].join('\n')
+      : null,
+    '</shared_state>',
+  ].filter(Boolean) as string[]
+
+  return lines.join('\n')
+}
+
+function formatSharedStateTurn(turn: AgentTurn) {
+  const status =
+    turn.status === 'done'
+      ? 'done'
+      : turn.success === false || turn.status === 'failed'
+        ? 'failed'
+        : turn.success === true || turn.status === 'executed'
+          ? 'ok'
+          : turn.status
+  const result = turn.executionResult
+    ? ` | result=${sanitizeTaskStateLine(
+        truncateRetainedText(turn.executionResult, SHARED_STATE_RESULT_MAX_LENGTH),
+      )}`
+    : ''
+  const tool = turn.toolName ? ` | tool=${sanitizeTaskStateLine(turn.toolName)}` : ''
+  return `- #${turn.index} ${status}: ${sanitizeTaskStateLine(turn.preview)}${tool}${result}`
+}
+
+function formatOutcomeStreak(outcomes: readonly boolean[]) {
+  if (outcomes.length === 0) {
+    return null
+  }
+
+  return `Recent outcomes: ${outcomes
+    .slice(-8)
+    .map((success) => (success ? 'ok' : 'failed'))
+    .join(' -> ')}`
+}
+
+function formatTaskState({
+  thread,
+  task,
+  latestUserMessage,
+  currentApp,
+  deviceState,
+  memoryEnabled,
+  memoryItems,
+}: {
+  thread?: AgentThread
+  task: string
+  latestUserMessage?: string
+  currentApp?: string
+  deviceState?: DeviceState
+  memoryEnabled: boolean
+  memoryItems?: readonly string[]
+}) {
+  const resolvedCurrentApp = currentApp ?? deviceState?.app
+  const resolvedCurrentPackage = deviceState?.packageName
+  const previousTaskApp = thread
+    ? findPreviousNonCurrentApp(thread, resolvedCurrentApp, resolvedCurrentPackage)
+    : null
+  const visitedApps = thread
+    ? formatVisitedApps(thread, {
+        app: resolvedCurrentApp,
+        packageName: resolvedCurrentPackage,
+      })
+    : null
+  const memory = memoryEnabled
+    ? [...(memoryItems ?? []), ...(thread?.memory ?? [])]
+        .slice(-TASK_STATE_MEMORY_ITEMS)
+        .map((item) =>
+          sanitizeTaskStateLine(truncateRetainedText(item, TASK_STATE_MEMORY_ITEM_MAX_LENGTH)),
+        )
+        .filter(Boolean)
+    : []
+  const helperAppGuidance = memoryEnabled
+    ? [
+        'Guidance: Preserve the original task while using helper apps.',
+        'If SMS, Messages, Mail, Browser, or Authenticator is opened only to retrieve a verification code,',
+        'store the code with note/remember, return to the previous task app, and continue the original flow.',
+        'Do not restart the login flow or keep reopening the helper app unless the code is missing or stale.',
+      ].join(' ')
+    : [
+        'Guidance: Preserve the original task while using helper apps.',
+        'If SMS, Messages, Mail, Browser, or Authenticator is opened only to retrieve a verification code,',
+        'return to the previous task app and continue the original flow without storing durable memory.',
+        'Do not restart the login flow or keep reopening the helper app unless the code is missing or stale.',
+      ].join(' ')
+
+  return [
+    '<task_state>',
+    `Original task: ${sanitizePromptContextLine(task, TASK_CONTEXT_MAX_LENGTH)}`,
+    latestUserMessage
+      ? `Latest user message: ${sanitizePromptContextLine(
+          latestUserMessage,
+          TASK_CONTEXT_MAX_LENGTH,
+        )}`
+      : null,
+    resolvedCurrentApp || resolvedCurrentPackage
+      ? `Current app: ${formatAppReference({
+          app: resolvedCurrentApp,
+          packageName: resolvedCurrentPackage,
+        })}`
+      : null,
+    previousTaskApp ? `Previous task app: ${formatAppReference(previousTaskApp)}` : null,
+    visitedApps ? `Visited apps: ${visitedApps}` : null,
+    thread?.lastActionPreview
+      ? `Last action: ${sanitizeTaskStateLine(thread.lastActionPreview)}`
+      : null,
+    thread?.lastExecutionResult
+      ? `Last result: ${sanitizeTaskStateLine(
+          truncateRetainedText(thread.lastExecutionResult, TASK_STATE_MEMORY_ITEM_MAX_LENGTH),
+        )}`
+      : null,
+    memory.length > 0 ? ['Durable memory:', ...memory.map((item) => `- ${item}`)].join('\n') : null,
+    helperAppGuidance,
+    '</task_state>',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function findPreviousNonCurrentApp(
+  thread: AgentThread,
+  currentApp?: string,
+  currentPackage?: string,
+) {
+  for (const turn of thread.turns.slice().reverse()) {
+    const app = turn.deviceSnapshot.currentApp || turn.deviceSnapshot.deviceState.app
+    const packageName = turn.deviceSnapshot.deviceState.packageName
+    if (!isKnownAppReference(app, packageName)) {
+      continue
+    }
+    if (isSameAppReference({ app, packageName }, { app: currentApp, packageName: currentPackage })) {
+      continue
+    }
+    return { app, packageName }
+  }
+
+  return null
+}
+
+function formatVisitedApps(
+  thread: AgentThread,
+  current: { app?: string; packageName?: string },
+) {
+  const entries: Array<{ app?: string; packageName?: string }> = []
+  for (const turn of thread.turns) {
+    pushUniqueAppReference(entries, {
+      app: turn.deviceSnapshot.currentApp || turn.deviceSnapshot.deviceState.app,
+      packageName: turn.deviceSnapshot.deviceState.packageName,
+    })
+  }
+  for (const packageName of thread.visitedPackages) {
+    pushUniqueAppReference(entries, { packageName })
+  }
+  pushUniqueAppReference(entries, current)
+
+  return entries
+    .slice(-TASK_STATE_VISITED_APP_LIMIT)
+    .map(formatAppReference)
+    .join(' -> ')
+}
+
+function pushUniqueAppReference(
+  entries: Array<{ app?: string; packageName?: string }>,
+  candidate: { app?: string; packageName?: string },
+) {
+  if (!isKnownAppReference(candidate.app, candidate.packageName)) {
+    return
+  }
+  if (entries.some((entry) => isSameAppReference(entry, candidate))) {
+    return
+  }
+  entries.push(candidate)
+}
+
+function formatAppReference({
+  app,
+  packageName,
+}: {
+  app?: string
+  packageName?: string
+}) {
+  const safeApp = sanitizeTaskStateLine(app)
+  const safePackage = sanitizeTaskStateLine(packageName)
+  if (safeApp && safePackage) {
+    return `${safeApp} (${safePackage})`
+  }
+  return safeApp || safePackage
+}
+
+function isSameAppReference(
+  left: { app?: string; packageName?: string },
+  right: { app?: string; packageName?: string },
+) {
+  const leftPackage = left.packageName?.trim()
+  const rightPackage = right.packageName?.trim()
+  if (leftPackage && rightPackage) {
+    return leftPackage === rightPackage
+  }
+
+  const leftApp = left.app?.trim()
+  const rightApp = right.app?.trim()
+  return Boolean(leftApp && rightApp && leftApp === rightApp)
+}
+
+function isKnownAppReference(app?: string, packageName?: string) {
+  const safeApp = sanitizeTaskStateLine(app)
+  const safePackage = sanitizeTaskStateLine(packageName)
+  return Boolean(safePackage || (safeApp && safeApp !== 'Unknown'))
+}
+
+function sanitizeTaskStateLine(value?: string) {
+  return value?.replace(/\s+/g, ' ').trim() ?? ''
+}
+
+function sanitizePromptContextLine(value: string, maxLength: number) {
+  return sanitizeTaskStateLine(truncatePromptContextText(value, maxLength))
+}
+
+function truncatePromptContextText(value: string, maxLength: number) {
+  return truncateRetainedText(value.trim(), maxLength)
 }

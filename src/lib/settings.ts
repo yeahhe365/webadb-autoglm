@@ -1,9 +1,10 @@
-import type { ModelConfig } from './openAiTypes'
+import { isReasoningEffort, type ModelConfig } from './openAiTypes'
 import {
   DEFAULT_ACTION_PROTOCOL,
   isActionProtocol,
   type ActionProtocol,
 } from './actionProtocol'
+import { isActionToolName, type ActionToolName } from './toolRegistry'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 export type LanguageMode = 'system' | 'zh-CN' | 'en-US'
@@ -12,11 +13,13 @@ export type AppSettings = {
   actionProtocol: ActionProtocol
   modelConfig: ModelConfig
   maxSteps: number
+  memoryEnabled: boolean
   preferAdbKeyboard: boolean
   confirmSensitiveActions: boolean
   unrestrictedMode: boolean
   screenBlackoutDuringAutoControl: boolean
   streamResponses: boolean
+  disabledActionTools: ActionToolName[]
   actionSettleMs: number
   doubleTapIntervalMs: number
   keyboardStepMs: number
@@ -25,6 +28,8 @@ export type AppSettings = {
 }
 
 export type SettingsStorage = Pick<Storage, 'getItem' | 'setItem'>
+
+export const MIN_AGENT_STEPS = 1
 
 const SETTINGS_KEY = 'webdroid-agent-settings'
 // Keep the previous project keys so existing browser settings survive the rename to WebDroid Agent.
@@ -41,11 +46,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
     model: 'gpt-5.5',
   },
   maxSteps: 50,
+  memoryEnabled: false,
   preferAdbKeyboard: false,
   confirmSensitiveActions: true,
   unrestrictedMode: false,
   screenBlackoutDuringAutoControl: false,
   streamResponses: false,
+  disabledActionTools: [],
   actionSettleMs: 1000,
   doubleTapIntervalMs: 100,
   keyboardStepMs: 1000,
@@ -97,8 +104,12 @@ function normalizeSettings(candidate: unknown): AppSettings {
       baseUrl: readString(modelConfig.baseUrl, DEFAULT_SETTINGS.modelConfig.baseUrl),
       apiKey: readString(modelConfig.apiKey, DEFAULT_SETTINGS.modelConfig.apiKey),
       model: readString(modelConfig.model, DEFAULT_SETTINGS.modelConfig.model),
+      ...(isReasoningEffort(modelConfig.reasoningEffort)
+        ? { reasoningEffort: modelConfig.reasoningEffort }
+        : {}),
     },
-    maxSteps: clamp(readNumber(candidate.maxSteps, DEFAULT_SETTINGS.maxSteps), 1, 200),
+    maxSteps: normalizeMaxSteps(candidate.maxSteps),
+    memoryEnabled: readBoolean(candidate.memoryEnabled, DEFAULT_SETTINGS.memoryEnabled),
     preferAdbKeyboard: readBoolean(candidate.preferAdbKeyboard, DEFAULT_SETTINGS.preferAdbKeyboard),
     confirmSensitiveActions: readBoolean(
       candidate.confirmSensitiveActions,
@@ -110,6 +121,7 @@ function normalizeSettings(candidate: unknown): AppSettings {
       DEFAULT_SETTINGS.screenBlackoutDuringAutoControl,
     ),
     streamResponses: readBoolean(candidate.streamResponses, DEFAULT_SETTINGS.streamResponses),
+    disabledActionTools: readActionToolNames(candidate.disabledActionTools),
     actionSettleMs: readRangeNumber(candidate.actionSettleMs, DEFAULT_SETTINGS.actionSettleMs, 100, 5000),
     doubleTapIntervalMs: readRangeNumber(
       candidate.doubleTapIntervalMs,
@@ -129,6 +141,10 @@ function readString(value: unknown, fallback: string) {
 
 function readNumber(value: unknown, fallback: number) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+export function normalizeMaxSteps(value: unknown, fallback = DEFAULT_SETTINGS.maxSteps) {
+  return Math.max(readNumber(value, fallback), MIN_AGENT_STEPS)
 }
 
 function readRangeNumber(value: unknown, fallback: number, min: number, max: number) {
@@ -152,10 +168,14 @@ function readActionProtocol(value: unknown, fallback: ActionProtocol): ActionPro
   return isActionProtocol(value) ? value : fallback
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+function readActionToolNames(value: unknown): ActionToolName[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_SETTINGS.disabledActionTools
+  }
+
+  return [...new Set(value.filter(isActionToolName))]
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max)
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

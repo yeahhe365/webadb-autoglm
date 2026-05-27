@@ -46,3 +46,14 @@ export {
   normalizeStayAwakeSetting,
   STAY_AWAKE_SETTING_KEY,
 } from './stayAwakeCommands'
+export {
+  buildDumpScreenTreeCommand,
+  buildReadScreenTreeCommand,
+  buildRemoveScreenTreeCommand,
+  formatScreenTreeForPrompt,
+  parseUiAutomatorDumpXml,
+  UI_AUTOMATOR_DUMP_PATH,
+  type DeviceScreenTree,
+  type ScreenTreeBounds,
+  type ScreenTreeNode,
+} from './uiAutomator'

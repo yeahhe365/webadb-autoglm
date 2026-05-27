@@ -27,6 +27,7 @@ describe('agent thread model', () => {
         modelConfig: {
           baseUrl: 'https://api.example.com/v1',
           model: 'vision-model',
+          reasoningEffort: 'low',
           stream: true,
         },
         autoExecute: true,
@@ -47,6 +48,7 @@ describe('agent thread model', () => {
           modelConfig: {
             baseUrl: 'https://api.example.com/v1',
             model: 'vision-model',
+            reasoningEffort: 'low',
             stream: true,
           },
           autoExecute: true,
@@ -88,6 +90,7 @@ describe('agent thread model', () => {
 
     recordThreadTurnExecution(thread, turn.id, {
       executionResult: 'input tap 100 200',
+      toolName: 'tap',
       success: true,
       now: 1300,
     })
@@ -107,6 +110,7 @@ describe('agent thread model', () => {
         promptContext: 'Task: Open Bluetooth',
         modelOutput: '{"action":"tap","x":100,"y":200,"reason":"open"}',
         executionResult: 'input tap 100 200',
+        toolName: 'tap',
         success: true,
         completedAt: 1300,
       }),
@@ -117,6 +121,14 @@ describe('agent thread model', () => {
       'assistant_action',
       'action_execution',
     ])
+    expect(thread.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'action_execution',
+          toolName: 'tap',
+        }),
+      ]),
+    )
     expect(thread.lastScreenshot).toEqual({
       dataUrl: 'data:image/png;base64,model',
       modelScreen: { width: 540, height: 1200 },

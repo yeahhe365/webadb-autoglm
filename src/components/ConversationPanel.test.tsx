@@ -103,6 +103,8 @@ describe('ConversationPanel', () => {
 
     const sidebar = screen.getByRole('complementary', { name: /history/i })
     expect(sidebar).toBeTruthy()
+    expect(sidebar.querySelector('.chat-history-count')?.textContent).toBe('2')
+    expect(sidebar.querySelectorAll('.chat-history-status-dot')).toHaveLength(2)
     expect(screen.getByRole('heading', { name: /recent chats/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /open chat second task/i }).getAttribute('aria-current')).toBe('page')
 
@@ -118,6 +120,34 @@ describe('ConversationPanel', () => {
     fireEvent.click(within(sidebar).getByRole('button', { name: /^new chat$/i }))
     expect(onStartNewChat).toHaveBeenCalledTimes(1)
     expect(onCloseHistorySidebar).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the searched term in the chat history empty state and clears it', () => {
+    renderConversationPanel({
+      historySidebarOpen: true,
+      threadSummaries: [
+        {
+          id: 'thread-1',
+          title: 'Open Wi-Fi',
+          task: 'Open Wi-Fi',
+          status: 'idle',
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ],
+    })
+
+    const search = screen.getByRole('textbox', { name: /search chat history/i })
+    fireEvent.change(search, { target: { value: 'billing' } })
+
+    expect(screen.getByText('No chats match "billing"')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /open chat open wi-fi/i })).toBeNull()
+
+    fireEvent.click(screen.getByText('Clear history search'))
+
+    expect((search as HTMLInputElement).value).toBe('')
+    expect(screen.getByRole('button', { name: /open chat open wi-fi/i })).toBeTruthy()
+    expect(screen.queryByText('No chats match "billing"')).toBeNull()
   })
 
   it('returns focus to the chat input after starting a new chat', () => {
@@ -164,7 +194,7 @@ describe('ConversationPanel', () => {
     )
   })
 
-  it('renders chat messages as sanitized markdown', () => {
+  it('renders chat messages as sanitized markdown', async () => {
     renderConversationPanel({
       conversation: [
         {
@@ -176,7 +206,7 @@ describe('ConversationPanel', () => {
     })
 
     const chatStream = screen.getByLabelText('Conversation')
-    const heading = within(chatStream).getByRole('heading', { name: 'Result' })
+    const heading = await within(chatStream).findByRole('heading', { name: 'Result' })
     const strong = within(chatStream).getByText('Done')
     const link = within(chatStream).getByRole('link', { name: 'Docs' })
 
@@ -210,6 +240,7 @@ describe('ConversationPanel', () => {
     })
     recordThreadTurnExecution(thread, turn.id, {
       executionResult: 'input tap 120 240',
+      toolName: 'tap',
       success: true,
       now: 1200,
     })
@@ -226,8 +257,15 @@ describe('ConversationPanel', () => {
     expect(within(step).getByText('#1')).toBeTruthy()
     expect(step.querySelector('.agent-step-action-icon svg')).toBeTruthy()
     expect(within(step).getByText('Executed')).toBeTruthy()
+    expect(step.querySelector('.agent-step-quick-meta')).toBeTruthy()
+    expect(within(step).getByText('10 ms')).toBeTruthy()
+    expect(within(step).getByText('Settings')).toBeTruthy()
+    expect(within(step).getByText('tap')).toBeTruthy()
+    expect(within(step).queryByText('Total 10 ms')).toBeNull()
     expect(within(step).queryByText('input tap 120 240')).toBeNull()
     fireEvent.click(within(step).getByText('Details'))
+    expect(within(step).getByText('Total 10 ms')).toBeTruthy()
+    expect(step.textContent).toContain('Tool: tap')
     expect(within(step).getByText('tap (120, 240) - open Wi-Fi')).toBeTruthy()
     expect(within(step).getByText('input tap 120 240')).toBeTruthy()
     expect(within(chatStream).queryAllByText('input tap 120 240')).toHaveLength(1)
@@ -252,7 +290,7 @@ describe('ConversationPanel', () => {
     const onStopRun = vi.fn()
     const onSubmitChatMessage = vi.fn()
     renderConversationPanel({
-      busyTask: { id: 'run-agent' },
+      busyTask: { id: 'run-agent', label: 'Run agent', startedAt: 1000 },
       chatInput: 'Queue this after stop',
       onStopRun,
       onSubmitChatMessage,
@@ -266,6 +304,29 @@ describe('ConversationPanel', () => {
 
     expect(onStopRun).toHaveBeenCalledTimes(1)
     expect(onSubmitChatMessage).not.toHaveBeenCalled()
+  })
+
+  it('shows run status and reveals a latest-message control when scrolled away from bottom', () => {
+    renderConversationPanel({
+      busyTask: { id: 'run-agent', label: 'Run agent', startedAt: 1000 },
+      conversation: [
+        { id: 'u1', role: 'user', content: 'Open Settings.' },
+        { id: 'o1', role: 'observation', content: 'Captured current screen.' },
+      ],
+    })
+
+    const chatStream = screen.getByLabelText('Conversation')
+    Object.defineProperty(chatStream, 'scrollHeight', { configurable: true, value: 1000 })
+    Object.defineProperty(chatStream, 'clientHeight', { configurable: true, value: 400 })
+    Object.defineProperty(chatStream, 'scrollTop', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    })
+    fireEvent.scroll(chatStream)
+
+    expect(screen.getByRole('status').textContent).toContain('Run agent')
+    expect(screen.getByRole('button', { name: /scroll to latest/i })).toBeTruthy()
   })
 
   it('explains disabled chat without showing advanced run actions or an inert execute button', () => {
@@ -308,19 +369,68 @@ describe('ConversationPanel', () => {
         action: 'tap',
         x: 120,
         y: 240,
+        reason: 'open Wi-Fi',
       },
-      preview: 'tap at 120, 240',
+      preview: 'tap at 120, 240 - open Wi-Fi',
+      timing: { captureMs: 1, currentAppMs: 2, modelMs: 3, parseMs: 4, totalMs: 10 },
     } as AgentStep
 
     renderConversationPanel({ pendingStep })
 
     const pendingAction = document.querySelector('.pending-action')
+    const chatStream = document.querySelector('.chat-stream')
     expect(pendingAction).toBeTruthy()
+    expect(pendingAction?.tagName).toBe('ARTICLE')
+    expect(pendingAction?.getAttribute('aria-label')).toBe('Pending action: Tap')
+    expect(pendingAction?.parentElement).toBe(chatStream)
+    expect(pendingAction?.querySelector('.agent-step-action-icon.pending-action-icon svg')).toBeTruthy()
     expect(within(pendingAction as HTMLElement).getByText('Pending action')).toBeTruthy()
     expect(within(pendingAction as HTMLElement).getByText('Step 2')).toBeTruthy()
-    expect(within(pendingAction as HTMLElement).getByText('tap (120, 240)')).toBeTruthy()
+    expect(pendingAction?.querySelector('.pending-action-meta')).toBeTruthy()
+    expect(within(pendingAction as HTMLElement).getByText('10 ms')).toBeTruthy()
+    expect(within(pendingAction as HTMLElement).getByText('tap')).toBeTruthy()
+    expect(within(pendingAction as HTMLElement).queryByText('Total 10 ms')).toBeNull()
+    expect(within(pendingAction as HTMLElement).getByText('Tap')).toBeTruthy()
+    expect(within(pendingAction as HTMLElement).getByText('open Wi-Fi')).toBeTruthy()
+    expect(within(pendingAction as HTMLElement).queryByText('tap (120, 240)')).toBeNull()
+    expect(pendingAction?.querySelector('.pending-action-preview')).toBeTruthy()
     expect(
       within(pendingAction as HTMLElement).getByRole('button', { name: /^execute$/i }),
     ).toBeTruthy()
+  })
+
+  it('shows only the nested reason for detailed pending repeat actions', () => {
+    const pendingStep = {
+      index: 52,
+      action: {
+        action: 'repeat',
+        count: 10,
+        actionToRepeat: {
+          action: 'swipe',
+          fromX: 350,
+          fromY: 520,
+          toX: 350,
+          toY: 1260,
+          durationMs: 400,
+          reason: '当前商品列表已到底部，按用户要求在广告/逛街任务期间反向持续滑动保持活跃并继续累计金币',
+        },
+        delayMs: 1000,
+      },
+      preview:
+        'repeat 10x swipe (350, 520) -> (350, 1260), 400ms, 1000ms delay - 当前商品列表已到底部，按用户要求在广告/逛街任务期间反向持续滑动保持活跃并继续累计金币',
+      timing: { captureMs: 1, currentAppMs: 2, modelMs: 3, parseMs: 4, totalMs: 10 },
+    } as AgentStep
+
+    renderConversationPanel({ pendingStep })
+
+    const pendingAction = document.querySelector('.pending-action') as HTMLElement
+
+    expect(within(pendingAction).getByText('Repeat')).toBeTruthy()
+    expect(
+      within(pendingAction).getByText(
+        '当前商品列表已到底部，按用户要求在广告/逛街任务期间反向持续滑动保持活跃并继续累计金币',
+      ),
+    ).toBeTruthy()
+    expect(within(pendingAction).queryByText(/repeat 10x swipe/)).toBeNull()
   })
 })

@@ -5,7 +5,6 @@ import type { InteractionStreamItem } from '../lib/interactionStream'
 import type { AgentConversationMessage } from '../lib/openAiTypes'
 import type { AgentThreadSummary } from '../lib/threadStore'
 import { ChatPanel } from './ChatPanel'
-import { PendingActionCard } from './PendingActionCard'
 
 export type ConversationPanelProps = {
   activeThreadId: string
@@ -62,21 +61,14 @@ export function ConversationPanel({
         onChatInputChange={onChatInputChange}
         onCloseHistorySidebar={onCloseHistorySidebar}
         onDeleteThread={onDeleteThread}
+        onExecutePendingStep={onExecutePendingStep}
         onSelectThread={onSelectThread}
         onStartNewChat={onStartNewChat}
         onStopRun={onStopRun}
         onSubmitChatMessage={onSubmitChatMessage}
         onToggleHistorySidebar={onToggleHistorySidebar}
+        pendingStep={pendingStep}
       />
-
-      {pendingStep ? (
-        <PendingActionCard
-          busyTask={busyTask}
-          copy={copy}
-          onExecutePendingStep={onExecutePendingStep}
-          pendingStep={pendingStep}
-        />
-      ) : null}
     </aside>
   )
 }

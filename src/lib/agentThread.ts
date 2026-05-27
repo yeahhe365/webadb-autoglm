@@ -4,8 +4,11 @@ import type { ActionProtocol } from './actionProtocol'
 import { createUnknownDeviceState, UNKNOWN_APP_NAME } from './deviceState'
 import type { AgentConversationMessage, AgentHistoryItem, ModelConfig } from './openAiTypes'
 import { compactScreenshotForMemory } from './screenshot'
+import { truncateRetainedTailText, truncateRetainedText } from './textRetention'
 
 const DEFAULT_THREAD_TITLE = 'New chat'
+const MAX_THREAD_MEMORY_ITEMS = 24
+const THREAD_MEMORY_ITEM_MAX_LENGTH = 1200
 
 export type AgentThreadStatus =
   | 'idle'
@@ -26,9 +29,10 @@ export type AgentTurnStatus =
 
 export type AgentSettingsSnapshot = {
   actionProtocol?: ActionProtocol
-  modelConfig?: Pick<ModelConfig, 'baseUrl' | 'model' | 'stream'>
+  modelConfig?: Pick<ModelConfig, 'baseUrl' | 'model' | 'reasoningEffort' | 'stream'>
   autoExecute?: boolean
   maxSteps?: number
+  memoryEnabled?: boolean
   confirmSensitiveActions?: boolean
   unrestrictedMode?: boolean
   screenBlackoutDuringAutoControl?: boolean
@@ -47,6 +51,7 @@ export type AgentDeviceSnapshot = {
 export type AgentTurnTiming = {
   captureMs: number
   currentAppMs: number
+  executionMs?: number
   modelMs: number
   parseMs: number
   totalMs: number
@@ -56,6 +61,7 @@ export type AgentTurn = {
   id: string
   index: number
   status: AgentTurnStatus
+  toolName?: string
   task: string
   latestUserMessage?: string
   promptContext: string
@@ -93,7 +99,7 @@ export type AgentThreadEvent =
       id: string
       type: 'assistant_action'
       turnId: string
-      modelOutput: string
+      modelOutput?: string
       actionPreview: string
       createdAt: number
     }
@@ -108,6 +114,7 @@ export type AgentThreadEvent =
       id: string
       type: 'action_execution'
       turnId: string
+      toolName?: string
       actionPreview: string
       executionResult: string
       success?: boolean
@@ -298,7 +305,6 @@ export function startThreadTurn(thread: AgentThread, input: StartThreadTurnInput
     {
       type: 'assistant_action',
       turnId: turn.id,
-      modelOutput: input.modelOutput,
       actionPreview: input.preview,
     },
     { now },
@@ -311,8 +317,11 @@ export function recordThreadTurnExecution(
   turnId: string,
   input: {
     executionResult?: string
+    toolName?: string
+    memoryEnabled?: boolean
     success?: boolean
     status?: AgentTurnStatus
+    timing?: AgentTurnTiming
     now?: number
   } = {},
 ) {
@@ -323,7 +332,13 @@ export function recordThreadTurnExecution(
 
   const now = input.now ?? Date.now()
   turn.executionResult = input.executionResult
+  if (input.toolName) {
+    turn.toolName = input.toolName
+  }
   turn.success = input.success
+  if (input.timing) {
+    turn.timing = input.timing
+  }
   turn.completedAt = now
   turn.status =
     input.status ??
@@ -339,6 +354,14 @@ export function recordThreadTurnExecution(
 
   thread.lastActionPreview = turn.preview
   thread.lastExecutionResult = input.executionResult
+  if (
+    input.memoryEnabled &&
+    turn.action.action === 'note' &&
+    input.success !== false &&
+    turn.action.message.trim()
+  ) {
+    rememberThreadInformation(thread, turn.action.message, { now })
+  }
   thread.history.push({
     step: turn.index,
     currentApp: turn.deviceSnapshot.currentApp,
@@ -370,6 +393,7 @@ export function recordThreadTurnExecution(
       {
         type: 'action_execution',
         turnId: turn.id,
+        toolName: input.toolName,
         actionPreview: turn.preview,
         executionResult: input.executionResult,
         success: input.success,
@@ -380,6 +404,43 @@ export function recordThreadTurnExecution(
 
   touchThread(thread, now)
   return turn
+}
+
+export function rememberThreadInformation(
+  thread: AgentThread,
+  information: string,
+  options: { now?: number } = {},
+) {
+  const content = information.trim()
+  if (!content) {
+    return null
+  }
+
+  const retained = truncateRetainedText(content, THREAD_MEMORY_ITEM_MAX_LENGTH)
+  thread.memory = [
+    ...thread.memory.filter((item) => item.trim() && item.trim() !== retained),
+    retained,
+  ].slice(-MAX_THREAD_MEMORY_ITEMS)
+  touchThread(thread, options.now)
+  return retained
+}
+
+export function appendThreadContextSummary(
+  thread: AgentThread,
+  summary: string,
+  options: { maxLength?: number; now?: number } = {},
+) {
+  const content = summary.trim()
+  if (!content) {
+    return thread.contextSummary
+  }
+
+  thread.contextSummary = truncateRetainedTailText(
+    [thread.contextSummary, content].filter(Boolean).join('\n'),
+    options.maxLength ?? 16000,
+  )
+  touchThread(thread, options.now)
+  return thread.contextSummary
 }
 
 export function recordThreadAssistantMessage(

@@ -1,8 +1,15 @@
 import { useCallback, useMemo, useState } from 'react'
 import { ADB_KEYBOARD_APK_URL } from '../adapters/adbKeyboard'
-import type { DeviceInfo, DeviceScreenshot, DeviceState, InstalledApp } from '../adapters/deviceTypes'
+import type {
+  DeviceBackend,
+  DeviceInfo,
+  DeviceScreenshot,
+  DeviceState,
+  DeviceTimingConfig,
+  InstalledApp,
+} from '../adapters/deviceTypes'
 import { getInstalledAppDisplayName } from '../adapters/installedApps'
-import { WebAdbDeviceBackend, isWebUsbSupported } from '../adapters/webAdbBackend'
+import { isWebUsbSupported } from '../adapters/webUsbSupport'
 import { buildActionPreview } from '../lib/actionPreview'
 import type { AgentAction } from '../lib/actionTypes'
 import type { AgentSession } from '../lib/agent'
@@ -32,8 +39,16 @@ export type DeviceSnapshotUpdate = {
 
 type UseDeviceControllerInput = {
   addLog: (entry: LogEntryInput) => void
-  backend: WebAdbDeviceBackend
+  backend: DeviceBackend & {
+    enableAdbKeyboard?(): Promise<string>
+    setPreferAdbKeyboard(value: boolean): void
+    setTimingConfig(value: DeviceTimingConfig): void
+  }
   busyTask: BusyTask | null
+  confirmSensitiveActionRequest: (
+    message: string,
+    action: AgentAction,
+  ) => boolean | Promise<boolean>
   copy: AppCopy
   initialSettings: AppSettings
   modelConfig: ModelConfig
@@ -45,6 +60,7 @@ export function useDeviceController({
   addLog,
   backend,
   busyTask,
+  confirmSensitiveActionRequest,
   copy,
   initialSettings,
   modelConfig,
@@ -169,6 +185,10 @@ export function useDeviceController({
 
   const configureAdbKeyboard = useCallback(async () => {
     await runTask('configure-adb-keyboard', copy.configureTextInput, async () => {
+      if (!backend.getInputMethods || !backend.installAdbKeyboard || !backend.enableAdbKeyboard) {
+        throw new Error(copy.noAdbKeyboardDownloadSupport)
+      }
+
       const inputMethods = await backend.getInputMethods().catch(() => '')
       const adbKeyboardInstalled = /adbkeyboard/i.test(inputMethods)
       const details: string[] = []
@@ -271,22 +291,14 @@ export function useDeviceController({
   )
 
   const confirmSensitiveAction = useCallback(
-    (message: string) => {
+    (message: string, action: AgentAction) => {
       if (unrestrictedMode || !confirmSensitiveActions) {
         return true
       }
 
-      return window.confirm(
-        [
-          `${copy.sensitiveActionTitle}:`,
-          '',
-          message,
-          '',
-          copy.sensitiveActionPrompt,
-        ].join('\n'),
-      )
+      return confirmSensitiveActionRequest(message, action)
     },
-    [confirmSensitiveActions, copy, unrestrictedMode],
+    [confirmSensitiveActionRequest, confirmSensitiveActions, unrestrictedMode],
   )
 
   return {

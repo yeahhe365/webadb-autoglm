@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -13,6 +13,8 @@ beforeEach(async () => {
   tempDirs.push(distDir)
   await writeFile(path.join(distDir, 'index.html'), '<main>WebDroid</main>')
   await writeFile(path.join(distDir, 'app.js'), 'console.log("ok")')
+  await mkdir(path.join(distDir, 'assets'))
+  await writeFile(path.join(distDir, 'assets/index-abc123.js'), 'console.log("asset")')
 })
 
 afterEach(async () => {
@@ -57,6 +59,18 @@ describe('createWebDroidServer', () => {
 
     expect(response.status).toBe(200)
     expect(await response.text()).toBe('')
+  })
+
+  it('serves immutable cache headers for built assets and no-cache for HTML', async () => {
+    const serverUrl = await listen(createWebDroidServer({ distDir }))
+
+    const assetResponse = await fetch(`${serverUrl}/assets/index-abc123.js`, { method: 'HEAD' })
+    const htmlResponse = await fetch(`${serverUrl}/`, { method: 'HEAD' })
+
+    expect(assetResponse.headers.get('cache-control')).toBe(
+      'public, max-age=31536000, immutable',
+    )
+    expect(htmlResponse.headers.get('cache-control')).toBe('no-cache')
   })
 
   it('serves the health check even when a query string is present', async () => {
